@@ -1,5 +1,6 @@
 <template>
   <div class="switch-root">
+    <SelectionControls></SelectionControls>
     <div class="switch-groups">
       <div v-for="(cate, index) in cates" :key="cate" class="switch-group">
         <div class="switch-group-title">{{ trans[cate] }}</div>
@@ -26,6 +27,7 @@ import KeyConfig from "@/components/KeyConfig.vue";
 import { Identifier, Category, ActionView } from "../common/types";
 import Action from "../components/Action.vue";
 import SimpleButton from "@/components/SimpleButton.vue";
+import SelectionControls from "@/components/SelectionControls.vue";
 import Base from "@/components/Base.vue";
 
 @Component({
@@ -33,12 +35,13 @@ import Base from "@/components/Base.vue";
     KeyConfig,
     Action,
     SimpleButton,
+    SelectionControls,
   },
 })
 export default class SwitchGroups extends Base {
   @Prop({ default: [] }) readonly cates!: Category[];
   actionKeys: Array<Identifier[]> = this.cates.map((x) =>
-    this.$controller.action.getKeys(x as Category)
+    this.$controller.action.getKeys(x as Category).filter(id => !["selectionPopup", "selectionPopupTrigger", "selectionPermission"].includes(id))
   );
   groupActions: Array<ActionView[]> = this.actionKeys.map((keys) =>
     keys.map((id) => this.$controller.action.getAction(id))

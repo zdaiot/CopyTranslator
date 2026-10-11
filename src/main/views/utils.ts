@@ -49,6 +49,8 @@ export const defaultConfig = {
   icon: icon,
   webPreferences: {
     nodeIntegration: true,
+    contextIsolation: false,
+    sandbox: false,
     webSecurity: false,
   },
 };

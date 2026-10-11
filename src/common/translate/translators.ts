@@ -1,5 +1,5 @@
 import { Translator, Language } from "./types";
-export { Translator, Language };
+export type { Translator, Language };
 import { TranslatorType } from "@/common/types";
 import { defaultTokens } from "./token";
 import { axios } from "./proxy";
@@ -12,7 +12,7 @@ export { detectLang };
 export const translators = new Map<TranslatorType, Translator>();
 
 const creators = new Map<TranslatorType, (config: any) => Translator>([
-  ["baidu", (c) => { const { Baidu } = require("@opentranslate/baidu"); return new Baidu({ axios, config: c }); }],
+  ["baidu", (c) => { const { BaiduCompatible } = require("./baidu-compatible"); return new BaiduCompatible({ axios, config: c }); }],
   ["google", (c) => { const { GoogleWrapper } = require("./google-wrapper"); return new GoogleWrapper({ axios, config: c }); }],
   ["keyan", () => { const { keyan } = require("./keyan"); return keyan; }],
   ["youdao", (c) => { const { Youdao } = require("@opentranslate2/youdao"); return new Youdao({ axios, config: c }); }],
@@ -69,7 +69,11 @@ export function getTranslator(transType: TranslatorType | string): Translator {
     let cfg = defaultTokens.get(transType as TranslatorType);
     try {
        if (config.has(transType as any)) {
-           cfg = config.get(transType as any);
+           const saved = config.get<any>(transType as any);
+           if (transType === "baidu") {
+             // Empty saved fields must not erase the release's built-in route.
+             cfg = { ...cfg, ...(saved?.appid?.trim() || saved?.key?.trim() ? saved : {}) };
+           } else cfg = saved;
        }
     } catch(e) {
       // config 可能未初始化或在渲染进程中不可用（虽然不太可能，因为 config 做了代理）

@@ -28,6 +28,7 @@ import {
   hideDirections,
   DragCopyMode,
   dragCopyModes,
+  selectionPopupTriggers,
   isValidActionButton,
   ActionButton,
   ListenClipboardMode,
@@ -146,6 +147,8 @@ function initConfig(
   config.setRule("autoCopy", new TypeRule<boolean>(false));
   config.setRule("listenClipboard", new TypeRule<boolean>(true));
   config.setRule("enableOCR", new TypeRule<boolean>(true)); // 启用 OCR
+  config.setRule("selectionPopup", new TypeRule<boolean>(false));
+  config.setRule("selectionPopupTrigger", new UnionRule("selectionButton", selectionPopupTriggers));
   config.setRule("dragCopy", new TypeRule<boolean>(false));
   config.setRule("doubleClickCopy", new TypeRule<boolean>(true));
   config.setRule("incrementalCopy", new TypeRule<boolean>(false));
@@ -343,6 +346,7 @@ function initConfig(
         "autoShow",
         "stayTop",
         "listenClipboard",
+        "selectionPopup",
         "dragCopy",
         "copySource",
         "copyResult",
@@ -363,6 +367,7 @@ function initConfig(
         "autoHide",
         "autoShow",
         "autoFormat",
+        "selectionPopup",
         "dragCopy",
         "stayTop",
         "listenClipboard",

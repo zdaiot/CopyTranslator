@@ -71,7 +71,8 @@ export class CustomTranslatorManager {
     console.debug("[供应商管理] 开始初始化...");
     this.loadFromConfig();
     this.expandProvidersToTranslators();
-    config.set("customTranslators", this.getAllIds());
+    // Only the main process publishes derived IDs to the shared store.
+    if (process.type !== "renderer") config.set("customTranslators", this.getAllIds());
     console.debug("[供应商管理] 初始化完成");
   }
 
@@ -89,10 +90,9 @@ export class CustomTranslatorManager {
       console.debug(`[供应商管理] 从配置加载 ${providerConfigs.length} 个供应商`);
       
       for (const cfg of providerConfigs) {
-        if (cfg.enabled !== false) {
-          this.providers.set(cfg.id, cfg);
-          console.debug(`[供应商管理] 加载供应商: ${cfg.id} (${cfg.name}), 启用 ${cfg.enabledModels.length} 个模型`);
-        }
+        // Keep disabled providers editable, without mutating shared Vuex data.
+        this.providers.set(cfg.id, JSON.parse(JSON.stringify(cfg)));
+        console.debug(`[供应商管理] 加载供应商: ${cfg.id} (${cfg.name}), 启用 ${cfg.enabledModels.length} 个模型`);
       }
     } catch (error) {
       console.error("[供应商管理] 加载失败:", error);
@@ -104,6 +104,7 @@ export class CustomTranslatorManager {
    */
   private expandProvidersToTranslators() {
     this.customTranslators.clear();
+    this.customConfigs.clear();
     
     for (const provider of this.providers.values()) {
       if (provider.enabled === false) continue;

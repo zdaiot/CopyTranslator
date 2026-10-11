@@ -98,10 +98,12 @@ export class RendererController extends RenController {
           this.app.$vuetify.theme.dark = isDarkMode();
         }
         break;
-      case "translatorProviders":
-        // customTranslatorManager.reload();
-        // 这里不需要reload，因为主进程会处理
+      case "translatorProviders": {
+        // Every window needs fresh provider/model names after shared settings change.
+        const { customTranslatorManager } = require("@/common/translate/custom-translators");
+        customTranslatorManager.reload();
         break;
+      }
       case "localeSetting":
         break;
       case "layoutType":

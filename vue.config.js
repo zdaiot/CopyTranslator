@@ -1,18 +1,11 @@
-const osType = require("os").type();
-const osSpec = {
-  Windows_NT: { iconName: "icon.ico" },
-  Darwin: { iconName: "icon.png" },
-  Linux: { iconName: "icon.png" },
-}[osType];
-const BundleAnalyzerPlugin = require("webpack-bundle-analyzer")
-  .BundleAnalyzerPlugin;
-
 const VuetifyLoaderPlugin = require("vuetify-loader/lib/plugin");
 const path = require("path");
 
 const trayIconName = "tray@2x.png";
 
 module.exports = {
+  lintOnSave: false,
+  chainWebpack: config => { config.plugins.delete("fork-ts-checker"); },
   transpileDependencies: [
     "vuetify",
     "@opentranslate/google",
@@ -36,9 +29,14 @@ module.exports = {
       customFileProtocol: "./",
       mainProcessTypeChecking: false,
       chainWebpackRendererProcess: (config) => {
-        // config.when(process.env.NODE_ENV === "production", (config) => {
-        //   config.plugin("analysis").use(new BundleAnalyzerPlugin());
-        // });
+        if (process.env.NODE_ENV === "production") config.plugin("define").tap(args => {
+          const appPath = 'require("path").join(process.resourcesPath, "app.asar")';
+          args[0].__dirname = appPath;
+          args[0].__filename = `${appPath} + "/index.html"`;
+          args[0].__static = appPath;
+          args[0]["process.env"].BASE_URL = appPath;
+          return args;
+        });
       },
       chainWebpackMainProcess: (config) => {
         config.resolve.alias.set(
@@ -76,6 +74,10 @@ module.exports = {
           repo: "copytranslator",
         },
         asar: true,
+        // uiohook-napi ships prebuilds for every supported target. Preserve the
+        // target binaries when cross-packaging instead of rebuilding for the host.
+        npmRebuild: false,
+        artifactName: "${productName}-${version}-${os}-${arch}.${ext}",
         extraResources: [
           {
             from: `dist_locales`,
@@ -89,13 +91,12 @@ module.exports = {
             from: trayIconName,
             to: trayIconName,
           },
-          {
-            from: osSpec.iconName,
-            to: osSpec.iconName,
-          },
+          { from: "icon.png", to: "icon.png" },
+          { from: "icon.ico", to: "icon.ico" },
         ],
         win: {
-          icon: osSpec.iconName,
+          extraResources: [{ from: "native/windows/SelectionHelper.ps1", to: "native/SelectionHelper.ps1" }],
+          icon: "icon.ico",
           target: [
             {
               target: "nsis",
@@ -123,12 +124,10 @@ module.exports = {
             },
           ],
           maintainer: "ziqiang_xu@qq.com",
-          icon: osSpec.iconName,
+          icon: "icon.png",
           category: "Education",
           // https://www.electron.build/configuration/linux#debian-package-options
-          desktop: {
-            Icon: "/opt/copytranslator/resources/linux-icon/icon.png",
-          },
+          desktop: { entry: { Icon: "/opt/copytranslator/resources/linux-icon/icon.png" } },
         },
         deb: {
           depends: ["libpng16-16"],
@@ -137,23 +136,29 @@ module.exports = {
           depends: ["libpng"],
         },
         mac: {
-          target: [
-            {
-              target: "default",
-              arch: ["x64"],
-            },
+          // Seal the whole bundle, including the Swift helper. Leaving only
+          // linker signatures makes TCC attribute helper access to an unsigned
+          // executable path instead of the authorized application bundle.
+          identity: process.env.CSC_NAME || "-",
+          binaries: ["Contents/Resources/native/selection-helper"],
+          target: [{ target: "dmg", arch: [process.env.BUILD_ARCH || process.arch] }],
+          icon: "icon-mac.png",
+          minimumSystemVersion: "13.0",
+          extraResources: [
+            { from: `build/native/${process.env.BUILD_ARCH || process.arch}/selection-helper`, to: "native/selection-helper" },
+            { from: "icon-mac.png", to: "icon-mac.png" },
           ],
-          icon: osSpec.iconName,
+          extendInfo: { NSAppleEventsUsageDescription: "CopyTranslator uses accessibility to read selected text for translation." },
         },
         nsis: {
-          installerIcon: osSpec.iconName,
+          installerIcon: "icon.ico",
           oneClick: false,
           perMachine: false,
           allowToChangeInstallationDirectory: true,
           license: "readable_license.txt",
         },
       },
-      externals: ["iohook", "shortcut-capture", "active-win","@nut-tree/nut-js"],
+      externals: ["uiohook-napi", "shortcut-capture", "@electron/remote"],
       // 这一步还蛮重要的，不然就会报错
       nodeModulesPath: ["./node_modules"],
     },

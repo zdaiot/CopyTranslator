@@ -2,6 +2,8 @@ export const authorizeKey: string = "CopyTranslator";
 import flatten from "lodash.flatten";
 //以下是做一个特定的事的动作
 export const normalActionTypes = [
+  "selectionPermission",
+  "selectionTranslate",
   "doubleCopyTranslate", //双击ctrl c 触发
   "translate", //翻译
   "selectionQuery", //翻译
@@ -68,6 +70,7 @@ export const constantActionTypes = [
   "version",
   "pasteDelay",
   "dragCopyMode",
+  "selectionPopupTrigger",
   "listenClipboardMode",
   "activeWindows",
   "primaryColor",
@@ -157,6 +160,7 @@ export const switchActionTypes = [
   "enableNotify",
   "smartTranslate",
   "smartDict",
+  "selectionPopup",
   "dragCopy",
   "doubleClickCopy", //鼠标双击复制
   "closeAsQuit",
@@ -235,6 +239,8 @@ export const temperatureOptions = ["0.0", "0.3", "0.5", "0.7", "1.0"] as const;
 
 // StepFun最大token预设值
 export const maxTokensOptions = ["1000", "2000", "4000", "8000"] as const;
+
+export const selectionPopupTriggers = ["selectionButton", "selectionDirect", "selectionShortcut"] as const;
 
 export const dragCopyModes = [
   "dragCopyGlobal",
@@ -367,6 +373,7 @@ export type Identifier =
   | Role
   | TranslatorGroup
   | Category
+  | typeof selectionPopupTriggers[number]
   | DragCopyMode
   | ListenClipboardMode
   | DisplayText;

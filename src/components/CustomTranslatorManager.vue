@@ -20,8 +20,13 @@
         >
           {{ trans["aiTranslatorDescription"] || "这些翻译器基于人工智能（大语言模型/LLM），可以理解上下文并提供更自然的翻译。所有在此处添加的供应商都需要您自行配置API密钥。" }}
         </v-alert>
+        <ol class="setup-steps">
+          <li>{{ isChinese ? '添加供应商，填写 API 地址和 API Key（支持 OpenAI 兼容接口）。' : 'Add a provider with its API URL and API key (OpenAI-compatible API).' }}</li>
+          <li>{{ isChinese ? '获取模型列表并点击启用；也可以在下方手动添加模型 ID。' : 'Fetch and enable models, or add a model ID manually below.' }}</li>
+          <li>{{ isChinese ? '在主界面或划词浮窗的引擎菜单中选择该模型，即可翻译。主界面选择 AI 模型后，单词和句子均使用 AI 翻译。' : 'Choose the model from either engine menu. Selecting an AI model in the main window uses AI for both words and sentences.' }}</li>
+        </ol>
         <!-- 供应商列表 -->
-        <v-expansion-panels v-if="providers.length > 0" multiple>
+        <v-expansion-panels v-if="providers.length > 0" v-model="expandedProviders" multiple>
           <v-expansion-panel
             v-for="provider in providers"
             :key="provider.id"
@@ -73,6 +78,7 @@
 
                 <!-- 模型选择区域 -->
                 <v-card-text class="px-0">
+                  <p class="caption">{{ isChinese ? '点击模型启用或停用，勾选的模型会出现在主界面和划词浮窗。' : 'Click models to enable or disable them. Checked models appear in both translation menus.' }}</p>
                   <div class="d-flex align-center mb-2">
                     <span class="subtitle-2">{{ trans["selectModels"] || "选择要启用的模型" }}</span>
                     <v-spacer></v-spacer>
@@ -83,7 +89,7 @@
                       @click="fetchProviderModels(provider)"
                     >
                       <v-icon small left>mdi-refresh</v-icon>
-                      {{ trans["refreshModels"] || "刷新" }}
+                      {{ isChinese ? '获取模型' : 'Fetch models' }}
                     </v-btn>
                   </div>
 
@@ -118,6 +124,11 @@
                   >
                     {{ trans["noModelsHint"] || "点击刷新按钮获取可用模型列表" }}
                   </v-alert>
+
+                  <div class="manual-model">
+                    <v-text-field v-model="provider.manualModel" :label="isChinese ? '手动添加模型 ID' : 'Add a model ID manually'" :hint="isChinese ? '填写服务商提供的准确模型名称' : 'Use the exact model ID from your provider'" persistent-hint outlined dense @keydown.enter.prevent="addManualModel(provider)"></v-text-field>
+                    <v-btn small outlined color="primary" :disabled="!provider.manualModel || !provider.manualModel.trim()" @click="addManualModel(provider)">{{ isChinese ? '添加并启用' : 'Add & enable' }}</v-btn>
+                  </div>
 
                   <!-- 模型获取错误 -->
                   <v-alert
@@ -187,6 +198,8 @@
               v-model="providerForm.apiBase"
               :label="trans['apiBase'] || 'API Base URL'"
               :rules="[rules.required]"
+              :hint="isChinese ? '填写接口基础地址，例如 https://api.example.com/v1，不含 /chat/completions' : 'API base URL, e.g. https://api.example.com/v1, without /chat/completions'"
+              persistent-hint
               outlined
               dense
             ></v-text-field>
@@ -339,11 +352,13 @@ interface ProviderWithUI extends ProviderConfig {
   availableModels?: string[];
   fetchingModels?: boolean;
   modelFetchError?: string;
+  manualModel?: string;
 }
 
 @Component
 export default class CustomTranslatorManagerView extends Vue {
   providers: ProviderWithUI[] = [];
+  expandedProviders: number[] = [];
   showAddProviderDialog = false;
   showTestDialog = false;
   formValid = false;
@@ -382,6 +397,8 @@ export default class CustomTranslatorManagerView extends Vue {
     return this.$store.getters.locale;
   }
 
+  get isChinese() { return String(this.trans.localeName).includes("中文"); }
+
   get templateItems() {
    return providerTemplates.map(t => {
      const item = {
@@ -415,16 +432,22 @@ export default class CustomTranslatorManagerView extends Vue {
     // 确保从配置加载最新数据
     customTranslatorManager.reload();
     this.loadProviders();
+    if (this.providers.length === 1) this.expandedProviders = [0];
   }
 
   loadProviders() {
     const baseProviders = customTranslatorManager.getAllProviders();
-    this.providers = baseProviders.map(p => ({
-      ...p,
-      availableModels: p.enabledModels.length > 0 ? [...p.enabledModels] : undefined,
-      fetchingModels: false,
-      modelFetchError: "",
-    }));
+    this.providers = baseProviders.map(p => {
+      const previous = this.providers.find(item => item.id === p.id);
+      return {
+        ...p,
+        enabledModels: [...p.enabledModels],
+        availableModels: [...new Set([...(previous?.availableModels || []), ...p.enabledModels])],
+        fetchingModels: false,
+        modelFetchError: "",
+        manualModel: previous?.manualModel || "",
+      };
+    });
   }
 
   onTemplateChange(templateType: string) {
@@ -455,24 +478,22 @@ export default class CustomTranslatorManagerView extends Vue {
         // 使用推荐模型作为后备
         const template = getProviderTemplate(provider.providerType);
         if (template && template.recommendedModels.length > 0) {
-          provider.availableModels = template.recommendedModels;
+          provider.availableModels = [...new Set([...provider.enabledModels, ...template.recommendedModels])];
           provider.modelFetchError = this.trans["usingRecommendedModels"] || "API 未返回模型列表，使用推荐模型";
         } else {
           provider.modelFetchError = this.trans["noModelsFound"] || "未找到任何模型";
-          provider.availableModels = [];
+          provider.availableModels = [...provider.enabledModels];
         }
       } else {
-        provider.availableModels = models;
-        console.log(`获取到 ${models.length} 个模型:`, models);
+        provider.availableModels = [...new Set([...provider.enabledModels, ...models])];
       }
     } catch (error) {
       provider.modelFetchError = error.message || "获取模型列表失败";
-      console.error("获取模型失败:", error);
       
       // 失败时尝试使用推荐模型
       const template = getProviderTemplate(provider.providerType);
       if (template && template.recommendedModels.length > 0) {
-        provider.availableModels = template.recommendedModels;
+        provider.availableModels = [...new Set([...provider.enabledModels, ...template.recommendedModels])];
       }
     } finally {
       provider.fetchingModels = false;
@@ -480,8 +501,18 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   updateProviderModels(providerId: string, models: string[]) {
-    customTranslatorManager.setEnabledModels(providerId, models);
-    this.loadProviders();
+    if (customTranslatorManager.setEnabledModels(providerId, models)) {
+      const provider = this.providers.find(item => item.id === providerId);
+      if (provider) provider.enabledModels = [...models];
+    }
+  }
+
+  addManualModel(provider: ProviderWithUI) {
+    const model = (provider.manualModel || "").trim();
+    if (!model) return;
+    provider.availableModels = [...new Set([...(provider.availableModels || []), model])];
+    this.updateProviderModels(provider.id, [...new Set([...provider.enabledModels, model])]);
+    provider.manualModel = "";
   }
 
   editProvider(provider: ProviderConfig) {
@@ -537,6 +568,7 @@ export default class CustomTranslatorManagerView extends Vue {
     }
     
     this.loadProviders();
+    this.expandedProviders = [this.providers.findIndex(provider => provider.id === this.providerForm.id)];
     this.closeProviderDialog();
     eventBus.at("dispatch", "reloadCustomTranslators", null);
   }
@@ -650,4 +682,8 @@ export default class CustomTranslatorManagerView extends Vue {
   height: 100%;
   overflow: auto;
 }
+.setup-steps { margin: 0 0 20px; padding-left: 20px; line-height: 1.8; }
+.manual-model { display: flex; align-items: flex-start; gap: 8px; margin-top: 18px; }
+.manual-model .v-btn { margin-top: 4px; flex-shrink: 0; }
+@media (max-width: 600px) { .manual-model { flex-direction: column; } .manual-model .v-input { width: 100%; } }
 </style>

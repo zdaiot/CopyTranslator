@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
+  <title>划词翻译 · CopyTranslator</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <button id="selection-button" data-action="translate" title="点击翻译 · CopyTranslator" aria-label="翻译选中文字" hidden><img src="icon.png" alt="CopyTranslator"></button>
+  <main class="popup" hidden>
+    <header class="toolbar">
+      <img class="brand" src="icon.png" alt="CopyTranslator" title="CopyTranslator">
+      <button id="engine" class="engine" type="button" aria-label="选择翻译引擎" aria-haspopup="menu" aria-controls="engine-menu" aria-expanded="false">
+        <span id="engine-name">选择翻译引擎</span><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <button id="pin" class="icon" title="固定浮窗" aria-label="固定浮窗" aria-pressed="false"><svg viewBox="0 0 24 24"><path d="m15 3 6 6-4 1-4 6-2-2-6 6-1-1 6-6-2-2 6-4z"/></svg></button>
+      <button class="icon" data-action="settings" title="设置翻译引擎" aria-label="设置"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+      <button class="icon" data-action="close" title="关闭（Esc）" aria-label="关闭"><svg viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6"/></svg></button>
+    </header>
+    <div id="engine-menu" class="engine-menu" role="menu" aria-label="翻译引擎" hidden></div>
+    <section class="card source-card">
+      <div class="section-heading"><span>原文</span><button class="icon small" data-action="copy-source" title="复制原文" aria-label="复制原文"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg></button></div>
+      <div id="source" class="text source"></div>
+      <button id="expand" class="text-button" hidden>展开原文</button>
+    </section>
+    <section class="card result-card" aria-live="polite" aria-busy="true">
+      <div class="section-heading"><span id="direction">译文</span><button id="copy-result" class="icon small" data-action="copy-result" title="复制译文" aria-label="复制译文" disabled><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg></button></div>
+      <div id="loading" class="loading"><span class="dots"><i></i><i></i><i></i></span><span>正在翻译…</span></div>
+      <div id="result" class="text result"></div>
+      <div id="error" class="error" hidden></div>
+      <button id="retry" class="text-button" data-action="retry" hidden>重试</button>
+    </section>
+    <footer><span id="hint">点击外部关闭 · Esc</span><button class="text-button" data-action="ai-settings">配置 AI 翻译商</button><button class="text-button" data-action="main">打开主窗口 <span aria-hidden="true">↗</span></button></footer>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>

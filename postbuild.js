@@ -12,6 +12,8 @@ const packagejson = JSON.parse(file);
 const source = `copytranslator Setup ${packagejson.version}.exe`;
 const target = `copytranslator-setup-${packagejson.version}.exe`;
 
+// Current builds already use the configured artifactName; keep legacy support.
+if (!fs.existsSync(path.join(dist_dir, source))) return;
 fs.renameSync(path.join(dist_dir, source), path.join(dist_dir, target));
 fs.renameSync(
   path.join(dist_dir, source + ".blockmap"),

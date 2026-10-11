@@ -7,6 +7,7 @@ export const defaultTokens = new Map<TranslatorType, any>([
     {
       appid: process.env.VUE_APP_BAIDU_APP_ID as string,
       key: process.env.VUE_APP_BAIDU_APP_KEY as string,
+      legacyClientId: process.env.VUE_APP_BAIDU_LEGACY_CLIENT_ID || "",
     },
   ],
   [

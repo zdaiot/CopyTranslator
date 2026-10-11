@@ -47,6 +47,7 @@ import {
   getEnabledWithCustomIds,
   filterByActiveEngines,
   filterExistingEngines,
+  hasTranslator,
 } from "@/common/translate/translators";
 import { tracker } from "./tracker";
 
@@ -168,8 +169,7 @@ class TranslateController {
         }
         break;
       case "pasteResult":
-        this.handle("copyResult", null);
-        simulate.paste();
+        void clipboard.writeText(this.resultString).then(() => simulate.paste());
         break;
       case "incrementCounter":
         if (typeof param != "number") {
@@ -313,10 +313,10 @@ class TranslateController {
     return false;
   }
 
-  checkClipboard(
+  async checkClipboard(
     checkFocus: boolean = false,
     engines?: (TranslatorType | string)[]
-  ): void {
+  ): Promise<void> {
     if (checkFocus) {
       isValidWindow("listenClipboard").then((valid) => {
         if (valid) {
@@ -328,7 +328,9 @@ class TranslateController {
       });
       return;
     }
-    const originalText = clipboard.readText();
+    if (clipboard.isPaused) return;
+    const originalText = await clipboard.readText();
+    if (clipboard.isPaused) return;
     logger.debug(`checkClipboard: text length ${originalText ? originalText.length : 0}`);
     if (typeof originalText != "string") {
       return; //内容并非文本
@@ -369,10 +371,9 @@ class TranslateController {
   postProcess(language: any, result: SharedResult) {
     this.translateResult = result; //BUG FIX: 因为resultString是依赖于result的，所以要先设置一下
     if (this.get<boolean>("autoCopy")) {
-      clipboard.writeText(this.resultString);
-      if (this.get<boolean>("autoPaste")) {
-        setTimeout(simulate.paste, this.get<number>("pasteDelay") * 1000); //延时粘贴
-      }
+      void clipboard.writeText(this.resultString).then(() => {
+        if (this.get<boolean>("autoPaste")) setTimeout(simulate.paste, this.get<number>("pasteDelay") * 1000);
+      });
     } else if (this.get<boolean>("autoFormat")) {
       clipboard.writeText(this.text);
     }
@@ -715,6 +716,8 @@ class TranslateController {
   }
 
   setWatch(watch: boolean) {
+    clipboard.off("text-changed");
+    clipboard.off("image-changed");
     if (watch) {
       // Ensure status is green (Listen) immediately
       this.setCurrentStatus();
@@ -722,7 +725,7 @@ class TranslateController {
       clipboard.on("text-changed", () => {
         this.checkClipboard(true);
       });
-      clipboard.on("image-changed", () => {
+      clipboard.on("image-changed", async () => {
         // OCR 相关
         if (!this.get<boolean>("enableOCR")) {
           return;
@@ -734,14 +737,14 @@ class TranslateController {
         }
         if (recognizer.enabled()) {
           logger.toast("检测到剪贴板图片");
-          recognizer.recognize(clipboard.readImage().toDataURL());
+          recognizer.recognize((await clipboard.readImage()).toDataURL());
           return;
         }
       });
       clipboard.startWatching();
       // Delay initial check to avoid startup race conditions and allow network initialization
       setTimeout(() => {
-        this.checkClipboard(true); //第一次检查剪贴板
+        if (this.get<boolean>("listenClipboard")) this.checkClipboard(true); //第一次检查剪贴板
       }, 1000);
     } else {
       clipboard.stopWatching();
@@ -750,12 +753,7 @@ class TranslateController {
 
   updateTranslatorSetting(engine: TranslatorType) {
     const key_config = this.get(engine) as KeyConfig;
-    const rule = config.getRule(engine);
-    if (rule.check && !rule.check(key_config)) {
-      logger.toast("请检查密钥配置");
-      return;
-    } else if(!rule.check && !examToken(key_config)){
-      // fallback到通用的检查方法，如果没有特殊检查方法的话
+    if (!config.checkStatus(engine, key_config).canEnable) {
       logger.toast("请检查密钥配置");
       return;
     }
@@ -764,12 +762,9 @@ class TranslateController {
     if (!oldTranslator) {
       return;
     }
-    const TranslatorClass: any = oldTranslator.constructor;
-    const newTranslator = new TranslatorClass({
-      axios: getProxyAxios(true),
-      config: key_config,
-    });
-    translators.set(engine, newTranslator);
+    // Reuse the same configuration resolution as startup (including defaults).
+    translators.delete(engine);
+    getTranslator(engine);
     eventBus.at("dispatch", "toast", `update  ${engine}`);
   }
 
@@ -798,6 +793,10 @@ class TranslateController {
         break;
       case "translatorProviders":
         customTranslatorManager.reload();
+        if (!hasTranslator(this.get<string>("translatorType"))) {
+          const fallback = getEnabledWithCustomIds(this.get("translator-enabled"), this.get("customTranslators")).find(hasTranslator);
+          if (fallback) this.controller.set("translatorType", fallback);
+        }
         break;
       case "listenClipboard":
         this.setWatch(value);

@@ -1,0 +1,10 @@
+const { spawnSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+if (process.platform !== 'darwin') process.exit(0);
+const arch = process.argv[2] || process.arch;
+if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture: ${arch}`);
+const output = path.resolve('build/native', arch);
+fs.mkdirSync(output, {recursive: true});
+const result = spawnSync('xcrun', ['swiftc', '-O', '-target', `${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos13.0`, '-module-cache-path', path.resolve('node_modules/.cache/swift'), 'native/macos/SelectionHelper.swift', '-o', path.join(output, 'selection-helper')], {stdio: 'inherit'});
+process.exit(result.status ?? 1);

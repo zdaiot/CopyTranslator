@@ -26,6 +26,7 @@ export class Recognizer {
 
   getShortcutCapture() {
     if (!this.shortcutCapture) {
+      require("@electron/remote/main").initialize();
       const ShortcutCapture = require("shortcut-capture");
       this.shortcutCapture = new ShortcutCapture();
       this.shortcutCapture.on("capture", (data: any) =>
@@ -52,6 +53,7 @@ export class Recognizer {
 
   capture() {
     this.getShortcutCapture().shortcutCapture();
+    require("@electron/remote/main").enable(this.shortcutCapture.$win.webContents);
   }
 
   getLanguage(): LanguageType {

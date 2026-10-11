@@ -98,10 +98,10 @@ const welcomeMessages = [
 ];
 
 export function showConfigFile() {
-  shell.openItem(env.configPath);
+  void shell.openPath(env.configPath);
 }
 export function showConfigFolder() {
-  shell.openItem(env.configDir);
+  void shell.openPath(env.configDir);
 }
 
 const actionLinks = new Map<Identifier, Handler>([

@@ -11,7 +11,7 @@ export const osSpec = {
     name: "windows",
   },
   Darwin: {
-    iconName: "icon.png",
+    iconName: "icon-mac.png",
     trayName: "tray@2x.png",
     name: "mac",
   },
@@ -28,7 +28,7 @@ function mkdir(path: string) {
   if (existsSync(path)) {
     return;
   } else {
-    mkdirSync(path);
+    mkdirSync(path, { recursive: true });
   }
 }
 
@@ -81,9 +81,10 @@ function detectPortableMode(): boolean {
 const usePortable = detectPortableMode();
 
 // 根据便携模式选择基础目录
-const baseDir = usePortable
+// Read the runtime environment; Vue CLI replaces process.env in renderer bundles.
+const baseDir = require("process").env.COPYTRANSLATOR_CONFIG_DIR || (usePortable
   ? join(dirname(process.execPath), "copytranslator")
-  : join(homedir(), "copytranslator");
+  : join(homedir(), "copytranslator"));
 
 const sharedConfig: SharedConfig = {
   configDir: baseDir,

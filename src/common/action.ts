@@ -18,6 +18,7 @@ import {
   translatorGroups,
   Category,
   dragCopyModes,
+  selectionPopupTriggers,
   listenClipboardModes,
   categories,
   displayTexts,
@@ -411,6 +412,10 @@ class ActionManager {
     this.append(switchAction("listenClipboard"));
     this.append(switchAction("enableOCR"));
     this.append(switchAction("stayTop"));
+    this.append(switchAction("selectionPopup"));
+    this.append(listAction("selectionPopupTrigger", [...selectionPopupTriggers], "basic", true));
+    this.append(normalAction("selectionTranslate"));
+    if (process.platform === "darwin") this.append(normalAction("selectionPermission", "basic"));
     this.append(switchAction("dragCopy"));
     this.append(switchAction("autoCopy"));
     this.append(switchAction("autoPaste"));
@@ -549,6 +554,9 @@ class ActionManager {
       autoCopy: { group: "剪贴板", span: 0.5 },
       autoPaste: { group: "剪贴板", span: 0.5 },
       autoFormat: { group: "剪贴板", span: 0.5 },
+      selectionPopupTrigger: { group: "剪贴板", span: 1 },
+      selectionPopup: { group: "剪贴板", span: 0.5 },
+      selectionPermission: { group: "剪贴板", span: 1 },
       dragCopy: { group: "剪贴板", span: 0.5 },
       incrementalCopy: { group: "剪贴板", span: 0.5 },
       colorMode: { group: "主题与颜色", span: 0.5 },

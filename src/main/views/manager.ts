@@ -245,16 +245,7 @@ export class WindowManager {
     }
     window.show();
     window.moveTop();
-    if (os.platform() == "win32") {
-      try {
-        //https://github.com/electron/electron/issues/2867
-        //https://www.npmjs.com/package/@adeperio/forcefocus
-        const forceFocus = require("@adeperio/forcefocus");
-        forceFocus.focusWindow(window);
-      } catch (e) {
-        console.error(e);
-      }
-    }
+    window.focus();
   }
 
   setStayTop(val: boolean) {
@@ -303,7 +294,7 @@ export class WindowManager {
           window.hide();
         }
       });
-      window.webContents.once("did-finish-load", (e: any) => {
+      window.webContents.once("did-finish-load", () => {
         this.started = true;
         for (const func of this.postStartCallbacks) {
           func();

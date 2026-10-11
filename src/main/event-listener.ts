@@ -1,161 +1,157 @@
+import { BrowserWindow, screen, systemPreferences } from "electron";
 import simulate from "./simulate";
-import os from "os";
 import { clipboard } from "./clipboard";
 import eventBus from "../common/event-bus";
 import config from "../common/configuration";
-import iohook from "iohook";
-import { isValidWindow } from "./focus-handler";
+import { foregroundApplication, isValidWindow } from "./focus-handler";
+import { macIntegration } from "./mac-integration";
+import { windowsIntegration } from "./windows-integration";
+import { selectionPopup } from "./selection-popup";
+import { isPointInside, Point, SelectionRevision } from "./selection-utils";
 
 class EventListener {
-  drag = false;
-  lastDown = Date.now();
-  lastX = 0;
-  lastY = 0;
-  newY = 0;
-  newX = 0;
-  copied: boolean = false;
-  // Just for linux x11
-  selectedText: string = clipboard.readText("selection");
-  preLeftBtn: string = "mouseup";
-  lastClick = Date.now();
-  lastClickX = 0;
-  lastClickY = 0;
-
-  lastCopy = Date.now();
+  private bound = false;
+  private hook?: typeof import("uiohook-napi").uIOhook;
+  private running = false;
+  private revision = new SelectionRevision();
+  private lastCopy = 0;
+  private copying = false;
+  private queued?: { point: Point; application?: { pid: number; name: string; handle?: number }; revision: number; explicit: boolean };
+  private down?: { point: Point; time: number };
+  private permission?: boolean;
+  private lastCapture = "none";
 
   bind() {
-    if (os.platform() !== "linux") {
-      this.bindHooks();
+    if (this.bound) return;
+    this.bound = true;
+    selectionPopup.init();
+    if (process.env.COPYTRANSLATOR_DISABLE_GLOBAL_HOOKS === "1") return;
+    if (process.platform === "darwin") {
+      macIntegration.on("status", (state) => {
+        if (this.permission !== state.accessibility) {
+          this.permission = state.accessibility;
+          console.info("Selection Accessibility permission:", state.accessibility ? "granted" : "missing");
+        }
+      });
+      macIntegration.on("pointerdown", (point) => this.pointerDown(point));
+      macIntegration.on("selection-gesture", (event) => { if (!event.doubleClick || config.get("selectionPopup") || config.get("doubleClickCopy")) void this.gesture(event, event.application); });
+      macIntegration.on("escape", () => this.dismiss());
+      macIntegration.on("double-copy", () => this.doubleCopy());
     } else {
-      this.bindLinuxHooks();
+      try {
+        this.hook = require("uiohook-napi").uIOhook;
+        this.hook!.on("mousedown", (event) => {
+          if (event.button !== 1) return;
+          const point = this.point(event);
+          this.pointerDown(point);
+          this.down = { point, time: Date.now() };
+        });
+        this.hook!.on("mouseup", (event) => {
+          if (event.button !== 1) return;
+          const point = this.point(event);
+          const dragged = this.down && Date.now() - this.down.time >= 100 && Math.hypot(point.x - this.down.point.x, point.y - this.down.point.y) >= 8;
+          this.down = undefined;
+          if (dragged || event.clicks >= 2 && (config.get("selectionPopup") || config.get("doubleClickCopy"))) void this.gesture(point);
+        });
+        this.hook!.on("keydown", (event) => {
+          if (event.keycode === 1) this.dismiss();
+          if (this.copying) return;
+          if (event.keycode === 46 && event.ctrlKey) {
+            const now = Date.now();
+            if (now - this.lastCopy < 800) this.doubleCopy();
+            this.lastCopy = now;
+          }
+        });
+      } catch (error) { console.warn("Global selection hook unavailable", error); }
     }
+    this.refresh();
   }
-
-  /**
-   * 只监听了鼠标事件
-   */
-  bindLinuxHooks() {
-    const Mouse = require("node-mouse");
-    const m = new Mouse();
-
-    m.on("mousedown", (event: any) => {
-      // 按住鼠标拖动的时候也会触发此事件
-      // 如果原本按钮就是pressed状态，则直接返回，不做处理
-      if (this.preLeftBtn) {
+  private point(point: Point): Point {
+    return process.platform === "win32" ? screen.screenToDipPoint(point) : { x: point.x, y: point.y };
+  }
+  private ownWindow(point: Point) {
+    const focused = BrowserWindow.getFocusedWindow();
+    return selectionPopup.contains(point) || !!focused && focused.isVisible() && isPointInside(point, focused.getBounds());
+  }
+  private pointerDown(point: Point) { this.revision.next(); selectionPopup.pointerDown(point); }
+  private dismiss() { this.revision.next(); selectionPopup.hide(); }
+  private doubleCopy() {
+    if (config.get("enableDoubleCopyTranslate")) setTimeout(() => eventBus.at("dispatch", "doubleCopyTranslate"), 100);
+  }
+  async translateSelection() {
+    if (!config.get("selectionPopup")) return;
+    await this.gesture(screen.getCursorScreenPoint(), undefined, true);
+  }
+  private async gesture(point: Point, application?: { pid: number; name: string; handle?: number }, explicit = false) {
+    if ((!config.get("selectionPopup") && !config.get("dragCopy")) || (!explicit && this.ownWindow(point))) return;
+    if (!explicit && config.get("selectionPopup") && config.get("selectionPopupTrigger") === "selectionShortcut") return;
+    const revision = this.revision.next();
+    if (this.copying) { this.queued = { point, application, revision, explicit }; return; }
+    let ownsCapture = false;
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+      if (!this.revision.current(revision)) return;
+      application = application || await foregroundApplication();
+      if (application.pid === process.pid || !application.pid || !await isValidWindow("dragCopy", application) || !this.revision.current(revision)) return;
+      if (!config.get("selectionPopup")) {
+        if (config.get("listenClipboard")) await simulate.copy();
         return;
       }
-
-      this.selectedText = clipboard.readText("selection");
-      // console.debug("mousedown: ", this.selectedText);
-      // 更新鼠标按钮状态
-      this.preLeftBtn = event.leftBtn;
-    });
-
-    m.on("mouseup", (event: any) => {
-      // console.debug(event)
-      console.debug("mouseup", clipboard.readText("selection"));
-      const selectedText = clipboard.readText("selection");
-      if (this.selectedText != selectedText) {
-        // 按下时选中的文本和释放时选中的文本不一致，则表示选中文本发生了变化
-        console.debug("selected text changed:", selectedText);
-        if (config.get("dragCopy")) {
-          // global.controller.tryTranslate(selectedText);
+      this.copying = true;
+      ownsCapture = true;
+      const text = await clipboard.withPaused(async () => {
+        if (process.platform === "darwin" || process.platform === "win32") {
+          const result = process.platform === "darwin"
+            ? await macIntegration.request("capture", { pid: application!.pid })
+            : await windowsIntegration.request("capture", { handle: application!.handle });
+          this.lastCapture = result.reason || result.method || "no-selection";
+          return result.text;
         }
+        return clipboard.readText("selection");
+      });
+      if (this.revision.current(revision) && config.get("selectionPopup") && typeof text === "string" && text.trim()) {
+        if (explicit) selectionPopup.show(text, point);
+        else selectionPopup.offer(text, point);
       }
-
-      // 更新鼠标按钮状态
-      this.preLeftBtn = event.leftBtn;
-    });
+    } catch (error) { console.warn("Selection capture unavailable", error); }
+    finally {
+      if (ownsCapture) {
+        this.copying = false;
+        const queued = this.queued;
+        this.queued = undefined;
+        if (queued && this.revision.current(queued.revision)) void this.gesture(queued.point, queued.application, queued.explicit);
+      }
+    }
   }
-
-  simulateCopy() {
-    simulate.copy();
-    eventBus.at("dispatch", "toast", "模拟复制");
+  async status() {
+    const enabled = !!config.get("selectionPopup");
+    if (process.platform !== "darwin") return { enabled };
+    const mainAccessibility = systemPreferences.isTrustedAccessibilityClient(false);
+    if (!enabled && !config.get("dragCopy") && !config.get("enableDoubleCopyTranslate")) {
+      return { enabled, accessibility: mainAccessibility, lastCapture: this.lastCapture };
+    }
+    try {
+      const state = await macIntegration.request("status");
+      return { ...state, enabled, mainAccessibility, lastCapture: this.lastCapture === "none" ? state.lastCapture : this.lastCapture };
+    } catch {
+      return { enabled, accessibility: mainAccessibility, error: "helper-unavailable" };
+    }
   }
-
-  bindHooks() {
-    // windows和mac上的监听
-    const ioHook = require("iohook");
-
-    ioHook.on("keydown", (event: any) => {
-      if (event.keycode == 46 && event.ctrlKey) {
-        //双击ctrl c 可以在没有开监听剪贴板的情况下 翻译
-        const now = Date.now();
-        if (
-          now - this.lastCopy < 1000 &&
-          config.get("enableDoubleCopyTranslate")
-        ) {
-          console.debug("triggered double ctrl c", clipboard.readText());
-          eventBus.at("dispatch", "doubleCopyTranslate");
-        }
-        this.lastCopy = now;
+  refresh() {
+    if (!this.bound || process.env.COPYTRANSLATOR_DISABLE_GLOBAL_HOOKS === "1") return;
+    this.revision.next();
+    const selection = !!config.get("selectionPopup") || !!config.get("dragCopy");
+    const doubleCopy = !!config.get("enableDoubleCopyTranslate");
+    selectionPopup.hide();
+    if (process.platform === "darwin") macIntegration.configure({ selection, doubleCopy });
+    else if (this.hook) {
+      const needed = selection || doubleCopy;
+      if (needed !== this.running) {
+        try { if (needed) this.hook.start(); else this.hook.stop(); this.running = needed; }
+        catch (error) { console.warn("Cannot start global selection hook", error); }
       }
-    });
-
-    ioHook.on("mouseup", (event: MouseEvent) => {
-      //模拟点按复制
-      if (
-        !this.copied &&
-        Date.now() - this.lastDown > 100 &&
-        Math.abs(this.newX - this.lastX) + Math.abs(this.newY - this.lastY) > 10
-      ) {
-        isValidWindow("dragCopy").then((valid) => {
-          const condition =
-            valid && config.get("dragCopy") && config.get("listenClipboard");
-          if (!condition) {
-            return;
-          }
-          this.simulateCopy();
-          if (event.ctrlKey) {
-            eventBus.at("dispatch", "incrementCounter", 1);
-          }
-          this.copied = true;
-        });
-      }
-    });
-
-    ioHook.on("mousedown", (event: MouseEvent) => {
-      this.lastDown = Date.now();
-      this.lastX = event.x;
-      this.lastY = event.y;
-      this.copied = false;
-    });
-
-    ioHook.on("mousedrag", (event: MouseEvent) => {
-      this.drag = true;
-      this.newX = event.x;
-      this.newY = event.y;
-    });
-
-    iohook.on("mouseclick", (event: MouseEvent) => {
-      const now = Date.now();
-      const newY = event.y;
-      const newX = event.x;
-      if (
-        now - this.lastDown < 500 &&
-        Math.abs(newX - this.lastClickX) < 4 &&
-        Math.abs(newY - this.lastClickY) < 4
-      ) {
-        isValidWindow("dragCopy").then((valid) => {
-          let condition =
-            valid &&
-            config.get("listenClipboard") &&
-            config.get("dragCopy") &&
-            config.get("doubleClickCopy");
-          if (condition) {
-            this.simulateCopy();
-          }
-        });
-      }
-      this.lastClick = now;
-      this.lastClickX = event.x;
-      this.lastClickY = event.y;
-    });
-
-    //注册的指令。send到主进程main.js中。
-    // Register and start hook
-    ioHook.start(false);
+    }
   }
+  stop() { this.dismiss(); if (this.running) this.hook?.stop(); this.running = false; windowsIntegration.stop(); }
 }
-
 export const eventListener = new EventListener();

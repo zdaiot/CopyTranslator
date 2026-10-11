@@ -374,5 +374,14 @@
     "contentPadding": "Content Padding",
     "<tooltip>contentPadding": "Set padding for source/result areas",
     "contentLineHeight": "Content Line Height",
-    "<tooltip>contentLineHeight": "Set line height for source/result areas"
+    "<tooltip>contentLineHeight": "Set line height for source/result areas",
+    "selectionPopup": "Selection translation popup",
+    "selectionPermission": "Open macOS Accessibility permissions",
+    "<tooltip>selectionPopup": "Show a translation near selected text. Uses Drag Copy application lists; macOS requires Accessibility permission.",
+    "<tooltip>selectionPermission": "Allow CopyTranslator to read selections, then restart the app.",
+    "selectionPopupTrigger": "Selection trigger",
+    "selectionButton": "Click selection button (recommended)",
+    "selectionDirect": "Translate immediately",
+    "selectionShortcut": "Keyboard shortcut only",
+    "selectionTranslate": "Translate current selection"
 }

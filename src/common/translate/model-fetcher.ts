@@ -56,8 +56,9 @@ export async function fetchModels(
     } else {
       throw new Error("API 返回格式不正确");
     }
-  } catch (error) {
-    console.error("[模型获取] 失败:", error);
+  } catch (error: any) {
+    // Axios errors include the Authorization header; never log the full object.
+    console.error("[模型获取] 失败，HTTP 状态:", error.response?.status || "network");
     
     // 提供更友好的错误信息
     if (error.response) {
@@ -117,7 +118,7 @@ export async function validateAPIConfig(
       valid: true,
       models,
     };
-  } catch (error) {
+  } catch (error: any) {
     return {
       valid: false,
       error: error.message || "验证失败",

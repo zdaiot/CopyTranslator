@@ -1,44 +1,38 @@
-const activeWindow = require("active-win");
 import { Identifier } from "@/store";
 import config from "../common/configuration";
+import { macIntegration } from "./mac-integration";
+import { windowsIntegration } from "./windows-integration";
+import { execFile } from "child_process";
+import { promisify } from "util";
+const execFileAsync = promisify(execFile);
 type BlackWhiteType = "listenClipboard" | "dragCopy";
 
-//检查该窗口是否在白名单内
-function checkList(windowName: string, identifier: BlackWhiteType): boolean {
-  const mode = config.get(`${identifier}Mode` as Identifier) as string;
-  if (mode.indexOf("Global") != -1) {
-    return true;
-  }
-  if (mode.indexOf("WhiteList") != -1) {
-    const whitelist = config.get(
-      `${identifier}WhiteList` as Identifier
-    ) as string[];
-    return whitelist.includes(windowName);
-  }
-  if (mode.indexOf("BlackList") != -1) {
-    const blacklist = config.get(
-      `${identifier}BlackList` as Identifier
-    ) as string[];
-    return !blacklist.includes(windowName);
-  }
-  throw "Unknown Mode";
+export async function foregroundApplication(): Promise<{ pid: number; name: string; handle?: number }> {
+  if (process.platform === "darwin") return macIntegration.request("frontmost");
+  if (process.platform === "win32") return windowsIntegration.request("frontmost");
+  // X11 only; Wayland intentionally restricts global selection access.
+  const active = await execFileAsync("xprop", ["-root", "_NET_ACTIVE_WINDOW"], { timeout: 1000 });
+  const handle = active.stdout.match(/0x[0-9a-f]+/i)?.[0];
+  if (!handle || handle === "0x0") return { pid: 0, name: "" };
+  const info = await execFileAsync("xprop", ["-id", handle, "_NET_WM_PID", "WM_CLASS"], { timeout: 1000 });
+  const names = [...info.stdout.matchAll(/"([^"\n]+)"/g)];
+  return { pid: Number(info.stdout.match(/_NET_WM_PID[^=]*=\s*(\d+)/)?.[1] || 0), name: names.pop()?.[1] || "" };
 }
 
-//注册该窗口，同时检查是否是在白名单内
-export async function isValidWindow(
-  identifier: BlackWhiteType
-): Promise<boolean> {
-  return activeWindow().then((res: any) => {
-    if (!res) {
-      return false;
-    }
-    const windowName = res.owner.name.toString();
-    console.log(identifier, windowName);
+export async function isValidWindow(identifier: BlackWhiteType, application?: { name: string }): Promise<boolean> {
+  const mode = config.get<string>(`${identifier}Mode` as Identifier);
+  // No foreground lookup or native process launch is needed in global mode.
+  if (mode.includes("Global") && !application) return true;
+  try {
+    const name = (application || await foregroundApplication()).name;
+    if (!name) return false;
     const windows = new Set(config.get<string[]>("activeWindows"));
-    if (!windows.has(windowName)) {
-      windows.add(windowName);
-      config.set("activeWindows", [...windows]);
-    }
-    return checkList(windowName, identifier);
-  });
+    if (!windows.has(name)) { windows.add(name); config.set("activeWindows", [...windows]); }
+    if (mode.includes("Global")) return true;
+    const list = config.get<string[]>(`${identifier}${mode.includes("WhiteList") ? "WhiteList" : "BlackList"}` as Identifier);
+    return mode.includes("WhiteList") ? list.includes(name) : !list.includes(name);
+  } catch (error) {
+    console.warn("Cannot determine foreground application", error);
+    return false;
+  }
 }

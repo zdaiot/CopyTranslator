@@ -35,7 +35,7 @@
         >
           <div :class="{ dragableDiv: !config.penerate }"></div>
         </v-spacer>
-        <v-menu top>
+        <v-menu offset-y max-width="360">
           <template v-slot:activator="{ on }">
             <div
               style="display: flex;"
@@ -58,23 +58,25 @@
               </v-badge>
             </div>
           </template>
-          <v-card :style="popupStyle" class="popup">
-            <v-row style="margin: 0px;">
-              <v-col
-                v-for="(engineGroup, groupIndex) in restEngineGroups"
-                :key="groupIndex"
-                style="padding: 0px;"
-              >
-                <div
-                  v-for="engine in engineGroup"
-                  :key="engine"
-                  :style="engineButtonStyle"
-                >
-                  <EngineButton :engine="engine" :valid="valid"></EngineButton>
-                </div>
-              </v-col>
-            </v-row>
-          </v-card>
+          <v-list dense class="engine-menu">
+            <template v-for="group in engineGroups">
+              <v-subheader :key="group.key">{{ group.title }}</v-subheader>
+              <v-list-item v-for="engine in group.items" :key="group.key + engine" @click="chooseEngine(engine, group.key === 'dictionary')">
+                <v-list-item-icon>
+                  <v-icon v-if="engine === currentEngine && (group.key === 'dictionary') === valid" small color="primary">mdi-check</v-icon>
+                  <span v-else :class="['engine-menu-icon', engineClass(engine)]"></span>
+                </v-list-item-icon>
+                <v-list-item-content><v-list-item-title>{{ engineName(engine) }}</v-list-item-title></v-list-item-content>
+              </v-list-item>
+              <div v-if="group.key === 'ai' && !group.items.length" :key="group.key + '-empty'" class="engine-help">{{ isChinese ? '尚未启用 AI 模型，请先添加供应商。' : 'No AI models enabled. Add a provider to get started.' }}</div>
+            </template>
+            <div v-if="valid" class="engine-help">{{ isChinese ? '选择翻译引擎会关闭智能词典模式。' : 'Choosing a translation engine turns off smart dictionary mode.' }}</div>
+            <v-divider></v-divider>
+            <v-list-item @click="callback('settings', 'customTranslators')">
+              <v-list-item-icon><v-icon small>mdi-plus-circle-outline</v-icon></v-list-item-icon>
+              <v-list-item-title>{{ isChinese ? '配置 AI 翻译商' : 'Configure AI providers' }}</v-list-item-title>
+            </v-list-item>
+          </v-list>
         </v-menu>
         <div class="d-flex flex-row" style="height: 100%; padding-right: 1px;">
           <div
@@ -116,6 +118,7 @@
         class="rounded-left-drawer"
       >
         <div class="drawer-groups">
+          <SelectionControls :compact="true"></SelectionControls>
           <div
             v-for="group in drawerGroups"
             :key="group.key"
@@ -157,22 +160,15 @@ import {
   Identifier,
   ActionButton as ActionButtonType,
   abstractTranslatorTypes,
-  GeneralTranslatorType,
   hexToRgb,
   colorStatusMap,
 } from "../common/types";
+import SelectionControls from "../components/SelectionControls.vue";
+import { TranslatorNameResolver } from "../common/translate/translator-name-resolver";
 import EngineButton from "../components/EngineButton.vue";
 
-import { dictionaryTypes, DictionaryType } from "../common/dictionary/types";
+import { dictionaryTypes } from "../common/dictionary/types";
 import "@/css/shared-styles.css";
-
-function sliceArray<T>(arr: T[], size: number) {
-  var arr2 = [];
-  for (var i = 0; i < arr.length; i = i + size) {
-    arr2.push(arr.slice(i, i + size));
-  }
-  return arr2;
-}
 
 @Component({
   components: {
@@ -180,6 +176,7 @@ function sliceArray<T>(arr: T[], size: number) {
     ContrastPanel,
     EngineButton,
     ActionButton,
+    SelectionControls,
     Tips,
   },
 })
@@ -193,7 +190,7 @@ export default class Contrast extends Mixins(BaseView, WindowController) {
     return action.layout?.stack ? "drawer-action-language" : "";
   }
   get drawerGroups() {
-    const actions = this.actionKeys.map((id) =>
+    const actions = this.actionKeys.filter(id => !["selectionPopup", "selectionPopupTrigger", "selectionPermission"].includes(id)).map((id) =>
       this.$controller.action.getAction(id)
     );
     const groups: Array<{ key: string; title: string; items: Identifier[] }> =
@@ -214,13 +211,9 @@ export default class Contrast extends Mixins(BaseView, WindowController) {
   }
 
   dialog: boolean = false;
-  marginBottom: number = 5;
 
   get valid() {
-    return (
-      this.mode == "dict" &&
-      (this.config.contrastDict || this.layoutType === "focus")
-    );
+    return this.mode === "dict";
   }
 
   penerate(value: boolean) {
@@ -243,47 +236,29 @@ export default class Contrast extends Mixins(BaseView, WindowController) {
 
 
 
-  get nButton() {
-    return Math.max(
-      1,
-      Math.floor(
-        (this.windowHeight - this.titlebarHeightVal) /
-          (this.titlebarHeightVal + this.marginBottom)
-      )
-    );
-  }
+  get isChinese() { return String(this.trans.localeName).includes("中文"); }
 
-  get customTranslators(): Array<GeneralTranslatorType | string> {
-    return this.config.customTranslators || [];
-  }
-
-  get engines(): Array<GeneralTranslatorType | DictionaryType | string> {
-    
-    const translatorEngines: Array<GeneralTranslatorType | string> = [
-      ...this.config["translator-enabled"],
+  get engineGroups() {
+    const custom = this.config.customTranslators || [];
+    const builtins = [...new Set<string>([
+      ...this.config["translator-enabled"].filter((id: string) => TranslatorNameResolver.isBuiltInTranslator(id)),
       ...abstractTranslatorTypes,
-      // 添加所有自定义翻译器
-      ...this.customTranslators,
+    ])];
+    return [
+      ...(this.valid ? [{ key: "dictionary", title: this.isChinese ? "词典" : "Dictionary", items: [...dictionaryTypes] }] : []),
+      { key: "translation", title: this.isChinese ? "翻译引擎" : "Translation engines", items: builtins },
+      { key: "ai", title: this.isChinese ? "AI 翻译模型" : "AI models", items: custom },
     ];
-    return this.mode == "dict" ? [...dictionaryTypes] : translatorEngines;
   }
 
-  get restEngines() {
-    return this.engines.filter((engine: any) => engine != this.currentEngine);
-  }
+  engineName(id: string) { return TranslatorNameResolver.getDisplayName(id, this.trans); }
+  engineClass(id: string) { return TranslatorNameResolver.getEngineClass(id); }
 
-  get restEngineGroups() {
-    return sliceArray(this.restEngines, this.nButton);
-  }
-
-  get engineButtonStyle() {
-    return { "margin-bottom": `${this.marginBottom}px` };
-  }
-
-  get popupStyle() {
-    const width = (this.titlebarHeightVal + 10) * this.restEngineGroups.length;
-    const margin = this.titlebarHeightVal / 2 + 5;
-    return { width: `${width}px`, "margin-top": `${margin}px` };
+  chooseEngine(id: string, dictionary: boolean) {
+    if (dictionary) { this.callback("dictionaryType", id); return; }
+    if (this.valid || (this.config.customTranslators || []).includes(id)) this.callback("smartDict", false);
+    this.callback("multiSource", id === "copytranslator");
+    if (id !== "copytranslator") this.callback("translatorType", id);
   }
 
   get actionButtons(): ActionButtonType[] {
@@ -506,4 +481,12 @@ export default class Contrast extends Mixins(BaseView, WindowController) {
 .action-btn {
   margin: auto;
 }
+</style>
+
+<style scoped>
+.engine-menu { width: 320px; max-width: calc(100vw - 24px); max-height: 70vh; overflow-y: auto; }
+.engine-menu .v-list-item__icon { margin-right: 12px; }
+.engine-menu .v-list-item__title { white-space: normal; overflow-wrap: anywhere; font-size: 13px; }
+.engine-menu-icon { display: block; width: 20px; height: 20px; background-position: center; background-size: contain; }
+.engine-help { padding: 4px 16px 12px; font-size: 12px; opacity: .7; }
 </style>

@@ -1,20 +1,8 @@
-import { osType } from "@/common/env";
+import { macIntegration } from "./mac-integration";
 
-async function simulateCopy() {
-  const { keyboard, Key } = require("@nut-tree/nut-js");
-  const modifier = osType == "Darwin" ? Key.LeftSuper : Key.LeftControl;
-  await keyboard.pressKey(modifier, Key.C);
-  await keyboard.releaseKey(modifier, Key.C);
+async function key(name: "C" | "V") {
+  if (process.platform === "darwin") { await macIntegration.request(name === "C" ? "copy" : "paste"); return; }
+  const { uIOhook, UiohookKey } = require("uiohook-napi");
+  uIOhook.keyTap(UiohookKey[name], [UiohookKey.Ctrl]);
 }
-
-async function simulatePaste() {
-  const { keyboard, Key } = require("@nut-tree/nut-js");
-  const modifier = osType == "Darwin" ? Key.LeftSuper : Key.LeftControl;
-  await keyboard.pressKey(modifier, Key.V);
-  await keyboard.releaseKey(modifier, Key.V);
-}
-
-export default {
-  copy: simulateCopy,
-  paste: simulatePaste,
-};
+export default { copy: () => key("C"), paste: () => key("V") };

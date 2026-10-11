@@ -165,10 +165,12 @@ export class UpdateChecker {
         autoHideMenuBar: true,
         webPreferences: {
           nodeIntegration: true,
+          contextIsolation: false,
+          sandbox: false,
           webSecurity: false,
         },
       }) as BrowserWindow;
-      win.on("closed", (e: any) => {
+      win.on("closed", () => {
         this.win = undefined;
       });
       this.win = win;

@@ -1,8 +1,9 @@
-import { Accelerator } from "electron";
+type Accelerator = string;
 import { env } from "./env";
 import { mapToObj, objToMap } from "./types";
 import fs from "fs";
 import { version, compatible } from "./constant";
+import { defaultSelectionShortcut } from "./selection-shortcut";
 export interface Shortcut {
   accelerator: Accelerator;
   id: string;
@@ -12,6 +13,7 @@ export type Shortcuts = Map<string, Accelerator>;
 
 export const defaultGlobalShortcuts: Shortcuts = new Map([
   ["focus", "Shift+F1"],
+  ["selectionTranslate", defaultSelectionShortcut],
   ["contrast", "Shift+F2"],
   ["simulateCopy", "Super+`"],
   ["simulateIncrementCopy", "Super+Shift+`"],
@@ -33,7 +35,14 @@ export const defaultLocalShortcuts: Shortcuts = new Map([
 export function resetFile(file: string, config: Map<string, Accelerator>) {
   const res = mapToObj(config);
   res["version"] = version;
-  fs.writeFileSync(file, JSON.stringify(res, null, 4));
+  const temporary = `${file}.tmp-${process.pid}`;
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(res, null, 4), { mode: 0o600 });
+    fs.renameSync(temporary, file);
+  } catch (error) {
+    if (fs.existsSync(temporary)) fs.unlinkSync(temporary);
+    throw error;
+  }
 }
 export function resetGlobalShortcuts() {
   resetFile(env.shortcut, defaultGlobalShortcuts);
@@ -62,7 +71,14 @@ export function loadFile(
 }
 
 export function loadGlobalShortcuts(): Map<string, Accelerator> {
-  return loadFile(env.shortcut, defaultGlobalShortcuts);
+  const shortcuts = loadFile(env.shortcut, defaultGlobalShortcuts);
+  // Migrate only this new action; retain every existing custom binding.
+  // An empty accelerator is an intentional disabled binding.
+  if (!shortcuts.has("selectionTranslate")) {
+    shortcuts.set("selectionTranslate", defaultGlobalShortcuts.get("selectionTranslate")!);
+    resetFile(env.shortcut, shortcuts);
+  }
+  return shortcuts;
 }
 
 export function loadLocalShortcuts(): Map<string, Accelerator> {

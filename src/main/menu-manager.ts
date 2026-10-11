@@ -10,7 +10,7 @@ import store from "../store";
 
 import { env } from "../common/env";
 import { constants } from "../common/constant";
-import { BrowserWindow, Menu, MenuItem, Tray } from "electron";
+import { BaseWindow, Menu, MenuItem, Tray, KeyboardEvent } from "electron";
 import bus from "../common/event-bus";
 import { ActionManager } from "@/common/action";
 import { CommonController } from "@/common/controller";
@@ -18,8 +18,8 @@ import { ConfigParser } from "@/common/configParser";
 
 type CallBack = (
   menuItem?: MenuItem,
-  browserWindow?: BrowserWindow,
-  event?: Event
+  browserWindow?: BaseWindow,
+  event?: KeyboardEvent
 ) => void;
 
 export interface MenuAction {
@@ -50,8 +50,8 @@ export class MenuManager {
   getCallback(...args: any[]): CallBack {
     return (
       menuItem?: MenuItem,
-      browserWindow?: BrowserWindow,
-      event?: Event
+      browserWindow?: BaseWindow,
+      event?: KeyboardEvent
     ) => {
       this.act.dispatch(...args);
     };

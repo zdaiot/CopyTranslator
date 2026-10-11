@@ -167,3 +167,7 @@ Thanks goes to these wonderful people ([emoji key](https://allcontributors.org/d
 <!-- ALL-CONTRIBUTORS-LIST:END -->
 
 This project follows the [all-contributors](https://github.com/all-contributors/all-contributors) specification. Contributions of any kind welcome!
+
+### 原生 Mac 与全局划词浮窗（本地改造）
+
+M 系列 Mac 原生 ARM64 构建、Windows x64 构建，以及全局划词浮窗的开启方式和验证范围，请参阅 [安装与构建说明](docs/selection-popup.md)。

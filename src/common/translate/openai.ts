@@ -173,7 +173,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
   };
 
   constructor(options: { axios: any; config: any }) {
-    super(options.axios);
+    super({ axios: options.axios });
     
     // 处理从配置系统传来的配置，字符串值需要转换
     if (options.config) {
@@ -187,7 +187,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
       }
       
       // 将字符串转换为数字
-      if (options.config.temperature) {
+      if (options.config.temperature !== undefined && options.config.temperature !== "") {
         const temp = parseFloat(options.config.temperature);
         this.config.temperature = isNaN(temp) ? 0.3 : temp;
       }
@@ -271,9 +271,8 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
 
       return response.data;
     } catch (error) {
-      console.error("OpenAI API 调用失败:", error);
       if (error && typeof error === 'object' && 'response' in error) {
-        console.error("错误响应:", (error as any).response.data);
+        console.error("AI 翻译 API 调用失败，HTTP 状态:", (error as any).response?.status);
         throw new TranslateError("API_SERVER_ERROR");
       }
       throw new TranslateError("NETWORK_ERROR");

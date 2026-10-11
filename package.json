@@ -7,26 +7,27 @@
     "build": "vue-cli-service build",
     "test:unit": "vue-cli-service test:unit",
     "lint": "vue-cli-service lint",
-    "electron:build": "npm run prebuild && vue-cli-service electron:build && npm run postbuild",
-    "electron:serve": "npm run prebuild && vue-cli-service electron:serve",
-    "postinstall": "electron-builder install-app-deps",
-    "rebuild": "npm rebuild --runtime=electron --target=8.2.3 --disturl=https://electronjs.org/headers --abi=76",
-    "rebuild_32": "npm rebuild --runtime=electron --target=8.2.3 --disturl=https://electronjs.org/headers --abi=76 --arch=ia32",
-    "prebuild": "tsc ./src/prebuild.ts --downlevelIteration --esModuleInterop && node ./src/prebuild.js && npm run clean",
+    "electron:build": "node scripts/build-native.js && npm run typecheck && npm run prebuild && vue-cli-service electron:build && npm run postbuild",
+    "electron:serve": "node scripts/build-native.js && npm run prebuild && vue-cli-service electron:serve",
+    "postinstall": "node scripts/prepare-dependencies.js",
+    "rebuild": "electron-builder install-app-deps",
+    "prebuild": "tsc ./src/prebuild.ts --target es2019 --module commonjs --esModuleInterop --skipLibCheck && node ./src/prebuild.js && npm run clean",
     "postbuild": "node postbuild.js",
     "clean": "node clean.js",
-    "postuninstall": "electron-builder install-app-deps",
     "docs:dev": "vuepress dev docs",
     "docs:build": "vuepress build docs",
     "docs:gen": "tsc ./src/generate-doc.ts --downlevelIteration --resolveJsonModule --esModuleInterop && node ./src/generate-doc.js && npm run clean",
-    "docs:deploy": "sh docs/.vuepress/release/sync.sh deploy"
+    "docs:deploy": "sh docs/.vuepress/release/sync.sh deploy",
+    "typecheck": "tsc --noEmit --skipLibCheck",
+    "build:mac": "node scripts/build-mac.js",
+    "build:win": "node scripts/build-windows.js",
+    "test:selection": "node scripts/test-selection.js && node scripts/test-popup.js && node scripts/test-popup-menu.js && node scripts/test-selection-trigger.js && node scripts/test-baidu.js && node scripts/test-selection-shortcut.js",
+    "test:ai": "node scripts/test-ai-providers.js"
   },
   "main": "background.js",
   "dependencies": {
-    "@adeperio/forcefocus": "^1.0.3",
     "@gotoeasy/bus": "^1.0.0",
     "@mdi/font": "^7.0.96",
-    "@nut-tree/nut-js": "^2.3.0",
     "@opentranslate/baidu": "^1.2.0",
     "@opentranslate/caiyun": "^1.2.0",
     "@opentranslate/google": "^1.2.0",
@@ -45,25 +46,21 @@
     "@types/lodash.trim": "^4.5.6",
     "@types/lodash.trimstart": "^4.5.6",
     "@wtfcode/vue-merge": "^2.0.3",
-    "active-win": "^7.7.2",
     "axios": "0.19.2",
     "baidu-aip-sdk": "^2.4.5",
     "diff": "^5.0.0",
     "eazydict-bing": "https://github.com/CopyTranslator/eazydict-bing.git",
     "eazydict-google": "https://github.com/CopyTranslator/eazydict-google.git",
     "eazydict-youdao": "https://github.com/CopyTranslator/eazydict-youdao.git",
-    "electron-clipboard-extended": "^1.1.1",
     "electron-log": "^4.2.4",
     "electron-updater": "4.2.5",
     "font-list": "^1.4.5",
-    "iohook": "0.9.0",
     "lodash.compact": "^3.0.1",
     "lodash.flatten": "^4.4.0",
     "lodash.sum": "^4.0.2",
     "lodash.trim": "^4.5.1",
     "lodash.trimend": "^4.5.1",
     "lodash.trimstart": "^4.5.1",
-    "node-mouse": "^0.0.2",
     "proxy-agent": "^4.0.0",
     "sbd": "^1.0.18",
     "shortcut-capture": "^1.2.3",
@@ -78,7 +75,9 @@
     "vuedraggable": "^2.24.3",
     "vuetify": "v2.6.12",
     "vuex": "^3.2.0",
-    "vuex-electron": "https://github.com/MaverickMartyn/vuex-electron.git"
+    "vuex-electron": "https://github.com/MaverickMartyn/vuex-electron.git",
+    "uiohook-napi": "1.5.5",
+    "@electron/remote": "2.1.3"
   },
   "devDependencies": {
     "@babel/plugin-proposal-class-properties": "^7.18.6",
@@ -100,35 +99,25 @@
     "@vue/eslint-config-typescript": "^7.0.0",
     "@vue/test-utils": "1.0.0-beta.29",
     "core-js": "3.6.5",
-    "electron": "8.2.3",
+    "electron": "44.7.0",
     "eslint": "^6.8.0",
     "eslint-plugin-prettier": "^3.1.3",
     "eslint-plugin-vue": "^6.2.2",
     "prettier": "^2.0.5",
     "sass": "^1.26.3",
     "sass-loader": "^8.0.2",
-    "typescript": "~4.1.5",
+    "typescript": "5.9.3",
     "vue-cli-plugin-electron-builder": "^1.4.6",
     "vue-template-compiler": "^2.6.11",
     "vuetify-loader": "^1.9.1",
-    "webpack-bundle-analyzer": "^3.7.0"
+    "webpack-bundle-analyzer": "^3.7.0",
+    "electron-builder": "26.15.3",
+    "ts-loader": "8.4.0",
+    "@types/node": "22.15.30"
   },
-  "cmake-js": {
-    "runtime": "electron",
-    "runtimeVersion": "^8.2.2"
-  },
-  "iohook": {
-    "targets": [
-      "node-72",
-      "electron-76"
-    ],
-    "platforms": [
-      "win32",
-      "darwin",
-      "linux"
-    ],
-    "arches": [
-      "x64"
-    ]
+  "resolutions": {
+    "electron-builder": "26.15.3",
+    "ts-loader": "8.4.0",
+    "@types/node": "22.15.30"
   }
 }

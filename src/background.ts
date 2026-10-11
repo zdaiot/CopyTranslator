@@ -1,5 +1,7 @@
 "use strict";
 import { app, protocol } from "electron";
+// A separate profile supports safe side-by-side testing without changing user data.
+if (process.env.COPYTRANSLATOR_CONFIG_DIR) app.setPath("userData", process.env.COPYTRANSLATOR_CONFIG_DIR);
 const gotTheLock = app.requestSingleInstanceLock();
 
 console.time("before-ready");
@@ -24,7 +26,6 @@ import { Controller } from "./main/controller";
 
 const isDevelopment = process.env.NODE_ENV !== "production";
 
-app.allowRendererProcessReuse = false;
 app.setAppUserModelId("com.copytranslator.copytranslator");
 
 const controller = new Controller();
@@ -49,12 +50,9 @@ app.on("will-quit", (event) => {
   controller.onExit();
 });
 
-app.on("activate", (event, hasVisibleWindows) => {
-  // On macOS it's common to re-create a window in the app when the
-  // dock icon is clicked and there are no other windows open.
-  if (!hasVisibleWindows) {
-    controller.createWindow();
-  }
+app.on("activate", () => {
+  // Dock activation always brings back the main window, even with a popup open.
+  if (controller.win.hasMain) controller.win.showWindow();
 });
 
 // 禁用本地缓存

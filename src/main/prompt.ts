@@ -1,5 +1,5 @@
 import { env } from "@/common/env";
-import { BrowserWindow, ipcMain, remote } from "electron";
+import { BrowserWindow, ipcMain } from "electron";
 
 const url = require("url");
 const path = require("path");
@@ -98,7 +98,7 @@ export function electronPrompt(options: any, parentWindow?: BrowserWindow) {
       webPreferences: {
         nodeIntegration: true,
         contextIsolation: false,
-        enableRemoteModule: options_.enableRemoteModule,
+        sandbox: false,
       },
       show: false,
     });

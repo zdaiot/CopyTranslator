@@ -13,7 +13,7 @@ import {
 } from "../common/types";
 import { startService } from "../proxy/main";
 import { ShortcutManager } from "./shortcut";
-import { app, shell } from "electron";
+import { app, ipcMain, shell, systemPreferences, globalShortcut } from "electron";
 import store, { observers, restoreFromConfig } from "../store";
 import { TranslateController } from "./translate-controller";
 import { l10n, L10N } from "./l10n";
@@ -33,7 +33,12 @@ import { electronPrompt } from "./prompt";
 import bus from "@/common/event-bus";
 import { tracker } from "./tracker";
 
+import { selectionPopup } from "./selection-popup";
+import { macIntegration } from "./mac-integration";
+import { clipboard } from "./clipboard";
+
 class Controller extends MainController {
+  readonly selectionPopup = selectionPopup;
   win: WindowManager = new WindowManager(this);
   menu: MenuManager = new MenuManager(this);
   updater = new UpdateChecker(this);
@@ -50,6 +55,40 @@ class Controller extends MainController {
     observers.push(this);
     observers.push(this.transCon);
     this.bindLinks(actionLinks);
+    const requireSelectionUI = (sender: Electron.WebContents) => {
+      if (!["settings", "contrast"].some(name => sender === this.win.windows.get(name as RouteActionType)?.webContents)) {
+        throw new Error("Selection controls require a trusted application window");
+      }
+    };
+    ipcMain.handle("selection-status", async (event) => {
+      requireSelectionUI(event.sender);
+      const shortcut = this.shortcut.shortcuts.get("selectionTranslate") || "";
+      return { ...await eventListener.status(), shortcut, shortcutRegistered: !!shortcut && globalShortcut.isRegistered(shortcut) };
+    });
+    ipcMain.handle("selection-shortcut:get", event => {
+      requireSelectionUI(event.sender);
+      return this.shortcut.selectionStatus();
+    });
+    ipcMain.handle("selection-shortcut:set", (event, accelerator: unknown) => {
+      requireSelectionUI(event.sender);
+      const result = this.shortcut.setSelection(accelerator);
+      for (const window of this.win.windows.values()) window.webContents.send("selection-shortcut:updated");
+      return result;
+    });
+    const recordingWindows = new Set<number>();
+    ipcMain.handle("selection-shortcut:record", (event, active: unknown) => {
+      requireSelectionUI(event.sender);
+      if (typeof active !== "boolean") throw new Error("Boolean required");
+      const sender = event.sender;
+      if (!recordingWindows.has(sender.id)) {
+        recordingWindows.add(sender.id);
+        sender.once("destroyed", () => {
+          recordingWindows.delete(sender.id);
+          this.shortcut.recordSelection(sender.id, false);
+        });
+      }
+      return this.shortcut.recordSelection(sender.id, active);
+    });
   }
 
   set(identifier: Identifier, value: any): boolean {
@@ -107,6 +146,15 @@ class Controller extends MainController {
 
   handle(identifier: Identifier, param: any = null): boolean {
     switch (identifier) {
+      case "selectionTranslate":
+        void eventListener.translateSelection();
+        break;
+      case "selectionPermission":
+        if (process.platform === "darwin") {
+          systemPreferences.isTrustedAccessibilityClient(true);
+          void shell.openExternal("x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility");
+        }
+        break;
       case "newConfigSnapshot":
         if (param == null) {
           this.promptForName();
@@ -197,6 +245,10 @@ class Controller extends MainController {
   }
 
   async onExit() {
+    eventListener.stop();
+    clipboard.stopWatching();
+    selectionPopup.stop();
+    macIntegration.stop();
     await this.transCon.onExit();
     await tracker.flush();
     this.config.save();
@@ -205,6 +257,7 @@ class Controller extends MainController {
   }
 
   postSet(identifier: Identifier, value: any): boolean {
+    if (["selectionPopup", "selectionPopupTrigger", "dragCopy", "enableDoubleCopyTranslate", "dragCopyMode"].includes(identifier)) eventListener.refresh();
     switch (identifier) {
       case "layoutType":
         this.win.syncBounds();
@@ -238,14 +291,15 @@ class Controller extends MainController {
         this.win.registerPostStart(() => this.win.setStayTop(value));
         break;
       case "skipTaskbar":
-        this.win.registerPostStart(() =>
-          this.win.mainWindow.setSkipTaskbar(value)
-        );
+        this.win.registerPostStart(() => {
+          if (process.platform === "darwin") {
+            if (value) app.dock?.hide();
+            else void app.dock?.show();
+          } else this.win.mainWindow.setSkipTaskbar(value);
+        });
         break;
       case "openAtLogin":
-        app.setLoginItemSettings({
-          openAtLogin: value,
-        });
+        if (!process.env.COPYTRANSLATOR_CONFIG_DIR) app.setLoginItemSettings({ openAtLogin: value });
         break;
       case "isNewUser":
         if (value) {
