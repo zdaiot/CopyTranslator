@@ -248,7 +248,7 @@
               </v-btn>
               <span class="caption">{{ isChinese ? '发送一次简短的模型请求，可能消耗少量额度。' : 'Sends a short model request; a small usage charge may apply.' }}</span>
             </div>
-            <v-alert v-if="draftTestResult" type="success" dense text role="status">{{ draftTestResult }}</v-alert>
+            <v-alert v-if="draftTestResult" type="success" dense text role="status" class="connection-result">{{ draftTestResult }}</v-alert>
             <v-alert v-if="draftTestError" type="error" dense text role="alert">{{ draftTestError }}</v-alert>
 
             <!-- 高级配置 -->
@@ -260,11 +260,30 @@
                 <v-expansion-panel-content>
                   <v-switch
                     :input-value="providerForm.config.stream !== false"
-                    @change="providerForm.config.stream = $event"
+                    @change="setDraftStream"
                     :label="isChinese ? '流式显示译文' : 'Stream translations'"
-                    :hint="isChinese ? 'AI 译文逐段显示；接口不支持流式时可关闭。' : 'Show AI translations as they arrive. Turn off for APIs without streaming support.'"
+                    :hint="isChinese ? '收到译文即显示；服务明确拒绝流式时自动改用普通返回。测试连接可验证实际返回方式。' : 'Show text as it arrives. Explicit stream rejection falls back to a complete response. Test the actual response mode below.'"
                     persistent-hint dense
                   ></v-switch>
+                  <v-select
+                    v-if="showReasoningProtocol"
+                    v-model="providerForm.config.reasoningProtocol"
+                    :items="reasoningProtocolItems"
+                    :label="isChinese ? '思考参数格式' : 'Reasoning API format'"
+                    @change="changeReasoningProtocol"
+                    outlined dense class="mt-4"
+                    :hint="isChinese ? '按服务商文档选择；兼容 Chat Completions 不代表支持同一套思考参数。' : 'Choose the format documented by your provider.'"
+                    persistent-hint
+                  ></v-select>
+                  <v-select
+                    v-model="providerForm.config.reasoningEffort"
+                    :items="reasoningItems"
+                    :label="isChinese ? '思考模式 / 强度' : 'Thinking / reasoning effort'"
+                    :disabled="!draftReasoningProtocol"
+                    :hint="reasoningHint"
+                    @change="invalidateDraftTest"
+                    outlined dense persistent-hint class="mt-4"
+                  ></v-select>
                   <div class="mt-2">
                     <label class="caption">
                       {{ trans["temperature"] || "温度" }}: {{ providerForm.config.temperature }}
@@ -292,12 +311,18 @@
 
                   <v-textarea
                     v-model="providerForm.config.prompt"
+                    @input="invalidateDraftTest"
                     :label="trans['customPrompt'] || '自定义提示词'"
-                    :placeholder="trans['promptPlaceholder'] || '留空使用默认提示词'"
-                    rows="4"
+                    :placeholder="defaultPrompt"
+                    :hint="isChinese ? '{text} = 原文，{to} = 目标语言，{from} = 源语言；留空使用框内默认模板。' : '{text} = source text, {to} = target language, {from} = source language. Empty uses the default template.'"
+                    persistent-hint
+                    rows="6"
                     outlined
                     dense
                   ></v-textarea>
+                  <v-btn small text color="primary" @click="restoreDefaultPrompt">
+                    {{ isChinese ? '恢复默认提示词' : 'Restore default prompt' }}
+                  </v-btn>
                 </v-expansion-panel-content>
               </v-expansion-panel>
             </v-expansion-panels>
@@ -392,6 +417,7 @@ import { Component, Vue } from "vue-property-decorator";
 import { clipboard, ipcRenderer } from "electron";
 import { customTranslatorManager } from "@/common/translate/custom-translators";
 import { normalizeProviderConnection, normalizeModelIds } from "@/common/translate/provider-config";
+import { DEFAULT_TRANSLATION_PROMPT, effectivePrompt, reasoningProtocol, reasoningChoices } from "@/common/translate/chat-settings";
 import { ProviderConfig } from "@/common/translate/types";
 import { providerTemplates, getProviderTemplate } from "@/common/translate/provider-templates";
 import eventBus from "@/common/event-bus";
@@ -404,6 +430,7 @@ interface ProviderWithUI extends ProviderConfig {
 
 @Component
 export default class CustomTranslatorManagerView extends Vue {
+  readonly defaultPrompt = DEFAULT_TRANSLATION_PROMPT;
   providers: ProviderWithUI[] = [];
   expandedProviders: number[] = [];
   showAddProviderDialog = false;
@@ -447,7 +474,10 @@ export default class CustomTranslatorManagerView extends Vue {
     config: {
       temperature: 0.3,
       maxTokens: 4000,
-      prompt: "",
+      prompt: DEFAULT_TRANSLATION_PROMPT,
+      stream: true,
+      reasoningProtocol: "auto",
+      reasoningEffort: "default",
     },
     enabled: true,
   };
@@ -461,6 +491,51 @@ export default class CustomTranslatorManagerView extends Vue {
   get hasDraftModel() { return this.providerForm.enabledModels.length > 0 || !!this.draftModelSearch?.trim(); }
   get draftModelItems() { return normalizeModelIds([...this.draftModels, ...this.providerForm.enabledModels]); }
   get draftTestModelId() { return this.providerForm.enabledModels.includes(this.draftTestModel) ? this.draftTestModel : this.providerForm.enabledModels[0] || ""; }
+
+  get draftReasoningProtocol() {
+    return reasoningProtocol(this.providerForm.providerType, this.providerForm.apiBase, this.providerForm.config?.reasoningProtocol);
+  }
+
+  get showReasoningProtocol() {
+    return !reasoningProtocol(this.providerForm.providerType, this.providerForm.apiBase) || (this.providerForm.config?.reasoningProtocol || "auto") !== "auto";
+  }
+
+  get reasoningProtocolItems() {
+    return [
+      { text: this.isChinese ? "自动识别" : "Auto-detect", value: "auto" },
+      { text: "DeepSeek (thinking + reasoning_effort)", value: "deepseek" },
+      { text: "OpenAI (reasoning_effort)", value: "openai" },
+    ];
+  }
+
+  get reasoningItems() {
+    const zh = { default: "跟随服务商默认", none: "关闭思考", minimal: "最低", low: "低", medium: "中", high: "高", xhigh: "更高", max: "最大" };
+    const en = { default: "Provider default", none: "Off", minimal: "Minimal", low: "Low", medium: "Medium", high: "High", xhigh: "Extra high", max: "Maximum" };
+    return reasoningChoices(this.draftReasoningProtocol).map(value => ({ value, text: (this.isChinese ? zh : en)[value] }));
+  }
+
+  get reasoningHint() {
+    if (!this.draftReasoningProtocol) return this.isChinese ? "默认不发送思考参数；如需控制，请先选择服务商支持的参数格式。" : "No reasoning override. Select a format supported by your provider to enable controls.";
+    const note = this.draftReasoningProtocol === "deepseek"
+      ? (this.isChinese ? "DeepSeek 当前默认开启高强度思考，翻译可选“关闭思考”以缩短等待。" : "DeepSeek currently defaults to high thinking; Off can reduce translation latency.")
+      : (this.isChinese ? "不同模型支持的强度不同，部分模型不能关闭思考；请用所选模型测试。" : "Supported levels vary by model; some cannot disable thinking. Test your selected model.");
+    return note + (this.isChinese ? " 此设置用于该供应商所有已启用模型，思考过程不作为译文显示。" : " Applies to all enabled models of this provider. Reasoning is not shown as translation.");
+  }
+
+  setDraftStream(value: boolean) {
+    this.$set(this.providerForm.config!, "stream", value);
+    this.invalidateDraftTest();
+  }
+
+  changeReasoningProtocol() {
+    this.$set(this.providerForm.config!, "reasoningEffort", "default");
+    this.invalidateDraftTest();
+  }
+
+  restoreDefaultPrompt() {
+    this.providerForm.config!.prompt = DEFAULT_TRANSLATION_PROMPT;
+    this.invalidateDraftTest();
+  }
 
   invalidateDraftTest() {
     this.testRequestVersion++;
@@ -526,11 +601,23 @@ export default class CustomTranslatorManagerView extends Vue {
     this.draftTestError = "";
     try {
       const result = await ipcRenderer.invoke("ai-provider:test", {
-        apiBase: this.providerForm.apiBase, apiKey: this.providerForm.apiKey, config: { ...this.providerForm.config },
+        apiBase: this.providerForm.apiBase, apiKey: this.providerForm.apiKey, providerType: this.providerForm.providerType, config: { ...this.providerForm.config },
       }, this.draftTestModelId);
       if (version !== this.testRequestVersion) return;
       if (!result.ok) { this.draftTestError = result.error; return; }
-      this.draftTestResult = `${this.isChinese ? '连接成功' : 'Connected'} · ${result.model} · ${(result.elapsedMs / 1000).toFixed(1)}s\n${result.text}`;
+      const seconds = (ms: number) => (ms / 1000).toFixed(2) + "s";
+      const mode = result.responseMode === "sse"
+        ? (this.isChinese ? `SSE 流式 · ${result.contentDeltas} 个文本增量` : `SSE stream · ${result.contentDeltas} text deltas`)
+        : result.responseMode === "fallback"
+          ? (this.isChinese ? "服务拒绝流式，已自动改用普通返回" : "Stream rejected; complete-response fallback succeeded")
+          : result.requestedStream
+            ? (this.isChinese ? "服务直接返回完整 JSON，未收到流式数据" : "Server returned complete JSON, not a stream")
+            : (this.isChinese ? "普通返回（流式已关闭）" : "Complete response (streaming off)");
+      const timing = this.isChinese
+        ? `首段译文 ${seconds(result.firstContentMs ?? result.elapsedMs)} · 总耗时 ${seconds(result.elapsedMs)}`
+        : `First text ${seconds(result.firstContentMs ?? result.elapsedMs)} · Total ${seconds(result.elapsedMs)}`;
+      const thinking = result.reasoningDeltas ? (this.isChinese ? " · 收到思考输出" : " · Reasoning received") : "";
+      this.draftTestResult = `${this.isChinese ? '连接成功' : 'Connected'} · ${result.model}\n${mode}${thinking}\n${timing}\n${result.text}`;
     } catch { if (version === this.testRequestVersion) this.draftTestError = this.isChinese ? "测试失败，请重试。" : "The test failed. Please retry."; }
     finally { if (version === this.testRequestVersion) this.testingDraft = false; }
   }
@@ -559,7 +646,7 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   get temperatureDesc(): string {
-    const temp = this.providerForm.config?.temperature || 0.3;
+    const temp = this.providerForm.config?.temperature ?? 0.3;
     if (temp < 0.2) return this.trans["temperatureDesc0"] || "更精确，更确定";
     if (temp < 0.5) return this.trans["temperatureDesc1"] || "平衡";
     if (temp < 0.8) return this.trans["temperatureDesc2"] || "更有创意";
@@ -592,6 +679,8 @@ export default class CustomTranslatorManagerView extends Vue {
     const template = getProviderTemplate(templateType);
     if (template) {
       this.providerForm.providerType = template.type;
+      this.providerForm.config!.reasoningProtocol = "auto";
+      this.providerForm.config!.reasoningEffort = "default";
       this.providerForm.apiBase = template.apiBase;
       this.providerForm.name = template.name;
       
@@ -668,7 +757,7 @@ export default class CustomTranslatorManagerView extends Vue {
     this.editingProvider = provider;
     // Load only persisted fields, without the list panel's temporary UI state.
     this.providerForm = JSON.parse(JSON.stringify(customTranslatorManager.getProvider(provider.id) || provider));
-    this.providerForm.config = { temperature: 0.3, maxTokens: 4000, prompt: "", ...this.providerForm.config };
+    this.providerForm.config = { temperature: 0.3, maxTokens: 4000, stream: true, reasoningProtocol: "auto", reasoningEffort: "default", ...this.providerForm.config, prompt: effectivePrompt(this.providerForm.config?.prompt) };
     this.draftModels = normalizeModelIds([...(this.providerForm.availableModels || []), ...this.providerForm.enabledModels]);
     this.selectedTemplate = "";
     this.showAddProviderDialog = true;
@@ -695,7 +784,10 @@ export default class CustomTranslatorManagerView extends Vue {
       this.providerForm.config = {
         temperature: 0.3,
         maxTokens: 4000,
-        prompt: "",
+        prompt: DEFAULT_TRANSLATION_PROMPT,
+        stream: true,
+        reasoningProtocol: "auto",
+        reasoningEffort: "default",
       };
     }
 
@@ -750,7 +842,10 @@ export default class CustomTranslatorManagerView extends Vue {
       config: {
         temperature: 0.3,
         maxTokens: 4000,
-        prompt: "",
+        prompt: DEFAULT_TRANSLATION_PROMPT,
+        stream: true,
+        reasoningProtocol: "auto",
+        reasoningEffort: "default",
       },
       enabled: true,
     };
@@ -848,6 +943,7 @@ export default class CustomTranslatorManagerView extends Vue {
 .manual-model { display: flex; align-items: flex-start; gap: 8px; margin-top: 18px; }
 .manual-model .v-btn { margin-top: 4px; flex-shrink: 0; }
 .model-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.connection-result { white-space: pre-line; overflow-wrap: anywhere; }
 .connection-test { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 @media (max-width: 600px) { .manual-model { flex-direction: column; } .manual-model .v-input { width: 100%; } }
 </style>

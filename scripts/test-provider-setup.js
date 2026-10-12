@@ -1,16 +1,22 @@
 const assert = require('assert').strict;
 const fs = require('fs'), vm = require('vm'), ts = require('typescript');
+const chatMocks = {};
 const quiet = {log() {}, debug() {}, warn() {}, error() {}};
 function load(file, mocks = {}, platform = process.platform) {
   const source = fs.readFileSync(file, 'utf8');
   const script = file.endsWith('.vue') ? require('vue-template-compiler').parseComponent(source).script.content : source;
   const code = ts.transpileModule(script, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019, experimentalDecorators: true, esModuleInterop: true}}).outputText;
   const module = {exports: {}};
-  vm.runInNewContext(code, {module, exports: module.exports, require: id => mocks[id] || require(id), process: {...process, type: 'browser', platform}, console: quiet, setTimeout, clearTimeout, URL, Error}, {filename: file});
+  vm.runInNewContext(code, {module, exports: module.exports, require: id => mocks[id] || chatMocks[id] || require(id), process: {...process, type: 'browser', platform}, console: quiet, setTimeout, clearTimeout, URL, Buffer, AbortController, Error}, {filename: file});
   return module.exports;
 }
 const plain = value => JSON.parse(JSON.stringify(value));
 const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return {promise, resolve}; };
+
+for (const name of ['chat-settings', 'provider-http', 'chat-stream', 'chat-request']) {
+  chatMocks['./' + name] = load('src/common/translate/' + name + '.ts');
+  chatMocks['@/common/translate/' + name] = chatMocks['./' + name];
+}
 
 async function run() {
   const config = load('src/common/translate/provider-config.ts');
@@ -36,8 +42,8 @@ async function run() {
   assert.equal(tested.text, '你好');
   assert.equal(calls[1].body.model, 'gateway/model');
   assert.equal(calls[1].body.max_tokens, 80);
-  assert.equal(calls[1].body.stream, false);
-  assert.equal(calls[1].options.timeout, 30000);
+  assert.equal(calls[1].body.stream, true);
+  assert.equal(calls[1].options.timeout, 60000);
   for (const status of [400, 401, 403, 404, 429, 500]) {
     failure = {response: {status, data: {error: {message: fakeKey}}}, message: fakeKey, config: {headers: {Authorization: fakeKey}}};
     await assert.rejects(fetcher.fetchModels(provider.apiBase, fakeKey), e => !!e.message && !e.message.includes(fakeKey));
@@ -140,6 +146,11 @@ async function run() {
   ctx.loadProviders();
   assert.deepEqual(plain(ctx.providers[1].availableModels), ['chat-a', 'chat-b', 'chat-c']);
   ctx.editProvider(ctx.providers[1]);
+  const defaults = chatMocks['./chat-settings'].DEFAULT_TRANSLATION_PROMPT;
+  assert.equal(ctx.providerForm.config.prompt, defaults, 'An existing empty prompt opens with the actual default template');
+  ctx.providerForm.config.prompt = 'Translate {text} to {to} with care';
+  ctx.providerForm.config.reasoningProtocol = 'deepseek';
+  ctx.providerForm.config.reasoningEffort = 'none';
   assert.deepEqual(plain(ctx.draftModelItems), ['chat-a', 'chat-b', 'chat-c']);
   ctx.providerForm.name = 'Renamed cached provider';
   ctx.providerForm.enabledModels = ['chat-b'];
@@ -150,6 +161,15 @@ async function run() {
   assert.equal('fetchingModels' in savedProviders[1], false, 'Transient UI state is never persisted');
 
   ctx.editProvider(ctx.providers[1]);
+  assert.equal(ctx.providerForm.config.prompt, 'Translate {text} to {to} with care', 'Custom prompts survive save and reopen');
+  assert.equal(ctx.providerForm.config.reasoningEffort, 'none', 'Reasoning preferences persist');
+  ctx.draftTestResult = 'stale test'; ctx.restoreDefaultPrompt();
+  assert.equal(ctx.providerForm.config.prompt, defaults);
+  assert.equal(ctx.draftTestResult, '', 'Restoring the default invalidates the old connection test');
+  ctx.$set = (target, key, value) => { target[key] = value; };
+  ctx.draftTestResult = 'stale test'; ctx.setDraftStream(false);
+  assert.equal(ctx.providerForm.config.stream, false);
+  assert.equal(ctx.draftTestResult, '');
   ctx.providerForm.apiKey = 'replacement-key'; ctx.invalidateDraftConnection();
   ctx.saveProvider();
   assert.deepEqual(savedProviders[1].availableModels, ['chat-b'], 'Changing credentials drops old candidates but preserves the selected model');

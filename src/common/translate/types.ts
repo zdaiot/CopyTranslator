@@ -1,3 +1,4 @@
+import type { ChatSettings } from "./chat-settings";
 import {
   TranslateResult,
   Language,
@@ -60,15 +61,12 @@ export const promiseAny = async <T>(
 };
 
 // OpenAI 兼容 API 的配置接口
-export interface OpenAIConfig {
+export interface OpenAIConfig extends ChatSettings {
+  providerType?: string;
   apiBase: string; // API 基础地址，例如: https://api.openai.com/v1
   apiKey: string; // API 密钥
   model?: string; // 模型名称，默认为 gpt-3.5-turbo
-  prompt?: string; // 自定义提示词模板，使用 {from}, {to}, {text} 作为占位符
-  temperature?: number; // 温度参数，默认为 0.3
-  maxTokens?: number; // 最大生成token数，默认为 2000
   translatorName?: string; // 翻译器名称
-  stream?: boolean;
   onProgress?: (text: string) => void;
   signal?: AbortSignal;
 }
@@ -85,13 +83,7 @@ export interface ProviderConfig {
   apiKey: string; // API 密钥
   enabledModels: string[]; // 已启用的模型列表，如 ["gpt-4", "gpt-3.5-turbo"]
   availableModels?: string[]; // 已获取或手动添加的候选模型；保存列表不代表启用
-  config?: {
-    // 可选的默认配置，会应用到所有模型
-    temperature?: number;
-    maxTokens?: number;
-    prompt?: string;
-    stream?: boolean;
-  };
+  config?: ChatSettings; // 应用于该供应商全部已启用的模型
   enabled?: boolean; // 是否启用该供应商（默认true）
 }
 

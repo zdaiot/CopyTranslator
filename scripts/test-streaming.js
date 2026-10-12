@@ -1,6 +1,7 @@
 const assert = require('assert').strict;
 const fs = require('fs'), vm = require('vm'), ts = require('typescript');
 const {Readable, PassThrough} = require('stream');
+const chatMocks = {};
 const quiet = {log() {}, debug() {}, warn() {}, error() {}};
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const plain = value => JSON.parse(JSON.stringify(value));
@@ -9,11 +10,16 @@ function load(file, mocks = {}) {
   const script = file.endsWith('.vue') ? require('vue-template-compiler').parseComponent(source).script.content : source;
   const code = ts.transpileModule(script, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019, experimentalDecorators: true, esModuleInterop: true}}).outputText;
   const module = {exports: {}};
-  vm.runInNewContext(code, {module, exports: module.exports, require: id => mocks[id] || require(id), process, console: quiet, setTimeout, clearTimeout, URL, Buffer, AbortController, Error}, {filename: file});
+  vm.runInNewContext(code, {module, exports: module.exports, require: id => mocks[id] || chatMocks[id] || require(id), process, console: quiet, setTimeout, clearTimeout, URL, Buffer, AbortController, Error}, {filename: file});
   return module.exports;
 }
 const frame = (content, finish_reason = null) => `data: ${JSON.stringify({choices: [{index: 0, delta: {content}, finish_reason}]})}\r\n\r\n`;
 const end = frame('', 'stop') + 'data: [DONE]\r\n\r\n';
+
+for (const name of ['chat-settings', 'provider-http', 'chat-stream', 'chat-request']) {
+  chatMocks['./' + name] = load('src/common/translate/' + name + '.ts');
+  chatMocks['@/common/translate/' + name] = chatMocks['./' + name];
+}
 
 async function run() {
   const streamLib = load('src/common/translate/chat-stream.ts');

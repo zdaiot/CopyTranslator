@@ -5,18 +5,8 @@ import {
   TranslateError,
 } from "./types";
 import { OpenAIConfig } from "./types";
-import * as http from "http";
-import * as https from "https";
-import axios from "axios";
-import { ChatStreamError, readChatStream, translationAborted } from "./chat-stream";
-
-// 默认提示词模板
-const DEFAULT_PROMPT = `You are a professional translator. Translate the following text to {to}. Only return the translated text without any explanation or additional information.
-
-Text to translate:
-{text}
-
-Translation:`;
+import { effectivePrompt } from "./chat-settings";
+import { requestChatCompletion } from "./chat-request";
 
 // 语言映射表 - 将 Language 映射为语言全名
 const langMap: [Language, string][] = [
@@ -129,31 +119,6 @@ export interface OpenAIChatMessage {
   content: string;
 }
 
-export interface OpenAIChatRequest {
-  model: string;
-  messages: OpenAIChatMessage[];
-  temperature?: number;
-  max_tokens?: number;
-  stream?: boolean;
-}
-
-export interface OpenAIChatResponse {
-  id: string;
-  object: string;
-  created: number;
-  model: string;
-  choices: Array<{
-    index: number;
-    message: OpenAIChatMessage;
-    finish_reason: string;
-  }>;
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
-}
-
 export class OpenAI extends BaseTranslator<OpenAIConfig> {
   name: string = "openai";
 
@@ -169,7 +134,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
     apiBase: "https://api.openai.com/v1",
     apiKey: "",
     model: "gpt-3.5-turbo",
-    prompt: DEFAULT_PROMPT,
+    prompt: effectivePrompt(),
     temperature: 0.3,
     maxTokens: 2000,
   };
@@ -183,10 +148,10 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
       this.config.apiKey = options.config.apiKey || "";
       this.config.model = options.config.model || this.config.model;
       
-      // 如果用户提供了自定义提示词，使用它；"default" 表示使用默认提示词
-      if (options.config.prompt && options.config.prompt !== "default") {
-        this.config.prompt = options.config.prompt;
-      }
+      this.config.prompt = effectivePrompt(options.config.prompt);
+      this.config.providerType = options.config.providerType;
+      this.config.reasoningProtocol = options.config.reasoningProtocol;
+      this.config.reasoningEffort = options.config.reasoningEffort;
       
       // 将字符串转换为数字
       if (options.config.temperature !== undefined && options.config.temperature !== "") {
@@ -211,7 +176,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
   private buildPrompt(text: string, from: Language, to: Language): string {
     const fromLang = OpenAI.langMap.get(from) || from;
     const toLang = OpenAI.langMap.get(to) || to;
-    const prompt = this.config.prompt || DEFAULT_PROMPT;
+    const prompt = effectivePrompt(this.config.prompt);
 
     // 如果源语言是 auto，就不在提示词中指定源语言，让 LLM 自动识别
     const actualPrompt = from === "auto" 
@@ -231,73 +196,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
     messages: OpenAIChatMessage[],
     config: OpenAIConfig
   ): Promise<string> {
-    const apiUrl = config.apiBase.endsWith("/")
-      ? `${config.apiBase}chat/completions`
-      : `${config.apiBase}/chat/completions`;
-
-    const requestData: OpenAIChatRequest = {
-      model: config.model || "gpt-3.5-turbo",
-      messages: messages,
-      temperature: config.temperature !== undefined ? config.temperature : 0.3,
-      max_tokens: config.maxTokens !== undefined ? config.maxTokens : 2000,
-      stream: !!config.onProgress && config.stream !== false,
-    };
-
-    const url = new URL(apiUrl);
-    const isLocal =
-      url.hostname === "localhost" ||
-      url.hostname === "127.0.0.1" ||
-      url.hostname === "::1" ||
-      url.hostname.startsWith("192.168.") ||
-      url.hostname.startsWith("10.");
-
-    const axiosConfig: any = {
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${config.apiKey}`,
-      },
-      timeout: 60000, // 设置 60 秒超时，AI 模型响应较慢
-      maxRedirects: 0,
-    };
-
-    if (isLocal) {
-      axiosConfig.httpAgent = new http.Agent();
-      axiosConfig.httpsAgent = new https.Agent();
-      axiosConfig.proxy = false;
-    }
-
-    const cancellation = axios.CancelToken.source();
-    const cancel = () => cancellation.cancel("Translation cancelled");
-    axiosConfig.cancelToken = cancellation.token;
-    if (config.signal?.aborted) throw translationAborted();
-    config.signal?.addEventListener("abort", cancel, { once: true });
-    if (requestData.stream) axiosConfig.responseType = "stream";
-    try {
-      const response = await this.axios.post<OpenAIChatResponse>(
-        apiUrl,
-        requestData,
-        axiosConfig
-      );
-
-      if (requestData.stream && typeof (response.data as any)?.[Symbol.asyncIterator] === "function") {
-        return await readChatStream(response.data as any, config.onProgress!, config.signal,
-          String(response.headers?.["content-type"]).includes("application/json"));
-      }
-      const content = response.data?.choices?.[0]?.message?.content;
-      if (typeof content !== "string" || !content.trim()) throw new TranslateError("API_SERVER_ERROR");
-      return content;
-    } catch (error) {
-      if (config.signal?.aborted) throw translationAborted();
-      if (error instanceof ChatStreamError) throw error;
-      (error as any)?.response?.data?.destroy?.();
-      if (error && typeof error === 'object' && 'response' in error) {
-        console.error("AI 翻译 API 调用失败，HTTP 状态:", (error as any).response?.status);
-        throw new TranslateError("API_SERVER_ERROR");
-      }
-      throw new TranslateError("NETWORK_ERROR");
-    } finally {
-      config.signal?.removeEventListener("abort", cancel);
-    }
+    return (await requestChatCompletion(this.axios, config, messages)).text;
   }
 
   /**

@@ -1,16 +1,22 @@
 const assert = require('assert').strict;
 const fs = require('fs'), vm = require('vm'), ts = require('typescript');
+const chatMocks = {};
 const quiet = {log() {}, debug() {}, warn() {}, error() {}};
 function load(file, mocks = {}, type = 'browser') {
   const source = fs.readFileSync(file, 'utf8');
   const script = file.endsWith('.vue') ? require('vue-template-compiler').parseComponent(source).script.content : source;
   const code = ts.transpileModule(script, {compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2019, experimentalDecorators: true, esModuleInterop: true}}).outputText;
   const module = {exports: {}};
-  vm.runInNewContext(code, {module, exports: module.exports, require: id => mocks[id] || require(id), process: {...process, type}, console: quiet, setTimeout, clearTimeout, URL}, {filename: file});
+  vm.runInNewContext(code, {module, exports: module.exports, require: id => mocks[id] || chatMocks[id] || require(id), process: {...process, type}, console: quiet, setTimeout, clearTimeout, URL, Buffer, AbortController, Error}, {filename: file});
   return module.exports;
 }
 const plain = value => JSON.parse(JSON.stringify(value));
 const provider = () => ({id: 'test-provider', name: 'Test provider', providerType: 'custom', apiBase: 'https://unit.test/v1', apiKey: 'fake-key', enabledModels: [], enabled: true, config: {}});
+
+for (const name of ['chat-settings', 'provider-http', 'chat-stream', 'chat-request']) {
+  chatMocks['./' + name] = load('src/common/translate/' + name + '.ts');
+  chatMocks['@/common/translate/' + name] = chatMocks['./' + name];
+}
 
 async function run() {
   // Use the real translation adapter with an in-memory HTTP transport. No keys,

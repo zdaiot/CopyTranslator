@@ -29,14 +29,31 @@ Windows ZIP 位于 `dist_electron/copytranslator-12.1.0-win-x64.zip`，解压整
 
 1. 添加供应商，填写服务商提供的 API 基础地址与 API Key。当前支持 OpenAI 兼容的 Chat Completions 接口；基础地址通常类似 `https://api.example.com/v1`。密钥框支持 Mac `⌘V`、Windows `Ctrl+V`，也可点击框内的“粘贴”按钮。
 2. 在添加窗口点击“获取模型列表”，应用向服务商的 `/models` 接口查询，再从下拉框中选择一个或多个支持文本对话的模型。不提供列表或列表中没有所需模型时，直接输入准确的模型 ID 并按回车；无需先保存供应商。
-3. 点击“测试连接”，用选定模型发送一次简短的 `/chat/completions` 请求，成功时显示模型、耗时和返回文本，失败时提示密钥、权限、额度、接口或网络问题。多选模型时可指定本次测试的模型。测试可能消耗少量服务商额度，获取列表成功不等于所有列出的模型都能翻译。
+3. 点击“测试连接”，用选定模型和当前高级配置发送一段公开示例原文。测试与真实翻译共用请求逻辑，包含提示词、流式和思考设置；成功时显示实际返回方式（SSE、完整 JSON 或流式拒绝后的普通返回）、文本增量数、首段译文等待时间、总耗时和返回文本，失败时提示密钥、权限、额度、参数或网络问题。多选模型时可指定本次测试的模型。测试可能消耗少量服务商额度，获取列表成功不等于所有列出的模型都能翻译。
 4. 点击“保存并启用”。主界面和划词浮窗都会列出已启用的“供应商名 - 模型名”，选择后才使用对应模型。获取到的完整候选列表会一起保存，返回管理页、重新编辑或重启应用后均可直接选择，无需再次获取；服务商新增模型时再点击“刷新模型”。
 
 API Key 与额度由服务商提供。新添加时需至少选择一个模型；旧配置中未启用任何模型的供应商不会出现在翻译菜单。主窗口选择 AI 模型后会关闭智能词典模式，让单词和句子都使用 AI 翻译。智能词典当前显示单词时，选择其他翻译引擎也会切换到译文；可在设置中重新开启智能词典。
 
 模型启停与供应商名称修改会同步到各窗口，无需重启。未启用的候选模型仍保留在列表中；停用模型只移除对应翻译器。刷新失败时保留上次成功获取的列表。修改 API 地址或密钥时会清除旧候选列表，已选择的模型 ID 保留供手动使用，也可重新获取新连接的模型。
 
-AI 翻译默认流式显示：主界面和划词浮窗收到译文后逐段更新，完成后才自动复制、通知或作为完整结果缓存。关闭浮窗、切换模型或重新翻译会取消旧请求，旧内容不会覆盖新结果。服务不支持流式时，可在供应商的“编辑 → 高级配置”关闭“流式显示译文”。流式响应解析遵循 [OpenAI Docs 的 Chat Completions 流式事件协议](https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events)，不显示模型的思考字段。
+AI 翻译默认流式显示：主界面和划词浮窗收到译文后逐段更新，完成后才自动复制、通知或作为完整结果缓存。关闭浮窗、切换模型或重新翻译会取消旧请求，旧内容不会覆盖新结果。服务明确以 400/422/501 拒绝 `stream` 参数时，自动使用相同模型、提示词及思考设置重试一次普通返回；直接返回完整 JSON 的服务也可正常使用。鉴权、限流、其他参数错误和中途断流不会触发重试。不明确的兼容性错误仍会提示，可在供应商的“编辑 → 高级配置”关闭“流式显示译文”。流式响应解析遵循 [OpenAI Docs 的 Chat Completions 流式事件协议](https://developers.openai.com/api/reference/resources/chat/subresources/completions/streaming-events)，不显示模型的思考字段。
+
+“高级配置 → 自定义提示词”现在直接显示实际默认模板，已有自定义内容保留，可点击“恢复默认提示词”。模板由设置页和翻译请求共用，`{text}`、`{to}`、`{from}` 分别替换为原文、目标语言和源语言。默认模板如下：
+
+```text
+You are a professional translator. Translate the following text to {to}. Only return the translated text without any explanation or additional information.
+
+Text to translate:
+{text}
+
+Translation:
+```
+
+同一页可选择“思考模式 / 强度”：默认跟随服务商，不额外发送思考参数。DeepSeek 支持关闭、低、高、最大，使用 `thinking.type` 和 `reasoning_effort`；[DeepSeek 官方文档](https://api-docs.deepseek.com/guides/thinking_mode)说明当前默认开启高强度思考。OpenAI 格式使用 `reasoning_effort`（关闭对应 `none`），可选强度依模型支持情况而定；不支持时提示参数错误，应用不会静默丢弃用户指定的思考设置。OpenAI 推理请求使用 `max_completion_tokens` 并保留服务商默认采样设置，依据 [OpenAI Docs 的 Chat Completions 参数说明](https://developers.openai.com/api/reference/resources/chat/subresources/completions/methods/create)。
+
+未知供应商默认不启用思考覆盖；自定义网关可按其文档选择 DeepSeek 或 OpenAI 思考参数格式，再测试具体模型。供应商设置应用于其全部已启用模型，`/models` 列表本身不能证明模型支持哪些思考强度。不显示思考过程，只显示最终回答的文本增量。
+
+2026-10-12 对用户已配置的 `deepseek-flash` 使用公开示例原文进行了真实 API 测试：默认思考模式首段译文约 1.83 秒、总计 2.04 秒、63 个文本增量；关闭思考后约 0.74 秒、总计 1.16 秒、62 个文本增量。均为真实 SSE，译文在请求完成前到达；这是单次观察，不是性能保证。自动回归测试另通过本地 HTTP 服务覆盖流式拒绝降级、JSON 兼容、鉴权/限流/思考参数错误不重试、断流与取消等情形。
 
 主界面的原文框支持键盘输入、中文输入法和粘贴。水平/垂直布局在原文框上方提供“翻译”按钮；专注布局通过“输入原文”切换至输入框。输入后点击翻译，或按 Mac `⌘Enter` / Windows `Ctrl+Enter`；单独回车换行，输入法选字期间不会触发翻译。生成译文时继续修改的草稿不会被后续输出覆盖。
 

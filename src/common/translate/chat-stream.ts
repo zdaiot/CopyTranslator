@@ -15,7 +15,8 @@ export async function readChatStream(
   stream: Readable,
   onProgress: (text: string) => void,
   signal?: AbortSignal,
-  jsonResponse = false
+  jsonResponse = false,
+  onDelta?: (kind: "content" | "reasoning") => void
 ): Promise<string> {
   const decoder = new StringDecoder("utf8");
   let buffer = "", text = "", finished = false, done = false;
@@ -50,7 +51,9 @@ export async function readChatStream(
     catch { throw new ChatStreamError("模型返回的流式数据格式不正确，请重试。"); }
     if (event.error) throw new ChatStreamError("模型在生成过程中返回错误，请重试或更换模型。");
     const choice = event.choices?.find((item: any) => item.index === 0) || event.choices?.[0];
-    if (typeof choice?.delta?.content === "string") {
+    if (typeof choice?.delta?.reasoning_content === "string" && choice.delta.reasoning_content) onDelta?.("reasoning");
+    if (typeof choice?.delta?.content === "string" && choice.delta.content) {
+      onDelta?.("content");
       text += choice.delta.content;
       update();
     }
@@ -82,6 +85,7 @@ export async function readChatStream(
       let result: any;
       try { result = JSON.parse(buffer); }
       catch { throw new ChatStreamError("模型返回的数据格式不正确，请检查接口地址。"); }
+      if (result.choices?.[0]?.finish_reason === "length") throw new ChatStreamError("译文未完成：已达到输出 Token 上限，请提高上限或缩短原文。");
       text = result.choices?.[0]?.message?.content;
       if (typeof text !== "string") throw new ChatStreamError("服务未返回译文，请检查模型是否支持文本对话。");
     } else {
