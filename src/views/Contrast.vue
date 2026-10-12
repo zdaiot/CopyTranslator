@@ -118,22 +118,24 @@
         class="rounded-left-drawer"
       >
         <div class="drawer-groups">
-          <SelectionControls :compact="true"></SelectionControls>
-          <div
-            v-for="group in drawerGroups"
-            :key="group.key"
-            class="drawer-group"
-          >
-            <div v-if="group.title" class="drawer-group-title">
-              {{ group.title }}
+          <template v-for="group in drawerGroups">
+            <SelectionControls
+              v-if="group.key === 'selection-controls'"
+              :key="group.key"
+              :compact="true"
+            ></SelectionControls>
+            <div v-else :key="group.key" class="drawer-group">
+              <div v-if="group.title" class="drawer-group-title">
+                {{ group.title }}
+              </div>
+              <Action
+                v-for="actionId in group.items"
+                :identifier="actionId"
+                :key="actionId"
+                :class="drawerActionClass(actionId)"
+              ></Action>
             </div>
-            <Action
-              v-for="actionId in group.items"
-              :identifier="actionId"
-              :key="actionId"
-              :class="drawerActionClass(actionId)"
-            ></Action>
-          </div>
+          </template>
         </div>
       </v-navigation-drawer>
 
@@ -206,6 +208,11 @@ export default class Contrast extends Mixins(BaseView, WindowController) {
       } else {
         groupMap.get(key)?.items.push(action.id);
       }
+    });
+    const clipboardGroup = this.$controller.action.getAction("autoCopy").layout?.group;
+    const clipboardIndex = groups.findIndex(group => group.key === clipboardGroup);
+    groups.splice(clipboardIndex < 0 ? groups.length : clipboardIndex + 1, 0, {
+      key: "selection-controls", title: "", items: [],
     });
     return groups;
   }

@@ -20,10 +20,9 @@
         ></v-select>
         <p class="help">{{ triggerHelp }}</p>
       </div>
-      <div>
-        <div class="field-label">{{ isChinese ? '快捷键 · 点击修改' : 'Shortcut · click to edit' }}</div>
+      <div class="shortcut-row">
+        <div class="field-label">{{ isChinese ? '快捷键' : 'Shortcut' }}</div>
         <SelectionShortcut :compact="true"></SelectionShortcut>
-        <p class="help">{{ isChinese ? '默认：' : 'Default: ' }}{{ defaultShortcut }}</p>
       </div>
       <div v-if="isMac" class="permissions">
         <p class="help" role="status">{{ statusText }}</p>
@@ -42,7 +41,6 @@ import { ipcRenderer } from "electron";
 import Base from "./Base.vue";
 import SelectionShortcut from "./SelectionShortcut.vue";
 import { selectionPopupTriggers } from "../common/types";
-import { defaultSelectionShortcut, formatSelectionShortcut } from "../common/selection-shortcut";
 
 @Component({ components: { SelectionShortcut } })
 export default class SelectionControls extends Base {
@@ -51,7 +49,6 @@ export default class SelectionControls extends Base {
   checking = false;
   state: { accessibility?: boolean; mouseMonitor?: boolean; error?: string } | null = null;
   get isChinese() { return String(this.trans.localeName).includes("中文"); }
-  get defaultShortcut() { return formatSelectionShortcut(defaultSelectionShortcut); }
   get triggerItems() { return selectionPopupTriggers.map(value => ({ value, text: this.trans[value] })); }
   get triggerHelp() {
     if (this.config.selectionPopupTrigger === "selectionShortcut") return this.isChinese ? "选中文字后按快捷键翻译。" : "Select text, then press the shortcut.";
@@ -85,12 +82,15 @@ export default class SelectionControls extends Base {
 .selection-heading h3 { font-size: 14px; font-weight: 600; margin: 0; overflow-wrap: anywhere; }
 .selection-toggle { flex: 0 0 auto; }
 .selection-toggle >>> .v-input--selection-controls__input { margin-right: 0; }
-.selection-details { display: grid; gap: 12px; margin-top: 12px; }
+.selection-details { display: grid; gap: 10px; margin-top: 10px; }
 .field-label { font-size: 12px; margin-bottom: 6px; }
+.shortcut-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; }
+.shortcut-row .field-label { margin: 0; flex: 0 0 auto; }
 .help { font-size: 12px; line-height: 1.5; opacity: .75; margin: 6px 0 0; overflow-wrap: anywhere; }
-.permissions { border-top: 1px solid rgba(128,128,128,.2); padding-top: 4px; }
-.permission-actions { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
-.compact { padding: 8px; }
+.permissions { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px; border-top: 1px solid rgba(128,128,128,.2); padding-top: 8px; }
+.permissions .help { margin: 0; }
+.permission-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.selection-controls.compact { padding: 8px; }
 .compact .selection-heading h3 { font-size: 12px; }
 .compact >>> .v-select__selections { font-size: 12px; }
 .compact >>> .v-input__slot { padding: 0 8px !important; }

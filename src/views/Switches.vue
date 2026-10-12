@@ -1,6 +1,5 @@
 <template>
   <div class="switch-root">
-    <SelectionControls></SelectionControls>
     <div class="switch-groups">
       <div v-for="(cate, index) in cates" :key="cate" class="switch-group">
         <div class="switch-group-title">{{ trans[cate] }}</div>
@@ -15,6 +14,7 @@
         </div>
       </div>
     </div>
+    <SelectionControls></SelectionControls>
     <div class="switch-restore">
       <SimpleButton @click="restore">{{ trans["restoreMultiDefault"] }}</SimpleButton>
     </div>

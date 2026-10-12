@@ -1,6 +1,6 @@
 <template>
   <div :class="['selection-shortcut', { compact }]">
-    <v-btn :small="!compact" :x-small="compact" :color="loaded && !registered ? 'warning' : undefined" outlined @click="openEditor" :title="label" :aria-label="label">
+    <v-btn class="shortcut-button ma-0" :small="!compact" :x-small="compact" :color="loaded && !registered ? 'warning' : undefined" outlined @click="openEditor" :title="label" :aria-label="label">
       <v-icon small left>mdi-keyboard-outline</v-icon>
       <span v-if="!compact">{{ isChinese ? '划词快捷键：' : 'Selection shortcut: ' }}</span>{{ display || '—' }}
     </v-btn>
@@ -52,7 +52,7 @@ export default class SelectionShortcut extends Base {
   get display() { return formatSelectionShortcut(this.shortcut); }
   get draftDisplay() { return formatSelectionShortcut(this.draft); }
   get defaultDisplay() { return formatSelectionShortcut(defaultSelectionShortcut); }
-  get label() { return `${this.isChinese ? '点击修改划词快捷键' : 'Edit selection shortcut'} · ${this.display}`; }
+  get label() { return `${this.isChinese ? '点击修改划词快捷键' : 'Edit selection shortcut'} · ${this.display} (${this.isChinese ? '默认：' : 'Default: '}${this.defaultDisplay})`; }
   get availability() {
     if (!this.loaded) return this.isChinese ? "正在检查…" : "Checking…";
     return this.registered ? (this.isChinese ? "已生效，点击可修改" : "Active · click to edit")
@@ -125,9 +125,9 @@ export default class SelectionShortcut extends Base {
 </script>
 
 <style scoped>
-.selection-shortcut { -webkit-app-region: no-drag; }
+.selection-shortcut { -webkit-app-region: no-drag; min-width: 0; max-width: 100%; }
 .selection-shortcut small { display: block; margin-top: 6px; opacity: .8; }
-.selection-shortcut.compact .v-btn { text-transform: none; letter-spacing: 0; max-width: 100%; height: auto; min-height: 28px; padding: 5px 8px; }
-.selection-shortcut.compact >>> .v-btn__content { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
+.selection-shortcut.compact .shortcut-button { text-transform: none; letter-spacing: 0; max-width: 100%; height: auto; min-height: 28px; padding: 5px 8px; }
+.selection-shortcut.compact .shortcut-button >>> .v-btn__content { white-space: normal; overflow-wrap: anywhere; min-width: 0; }
 .recording-hint { margin-top: 12px; font-size: 12px; }
 </style>
