@@ -71,8 +71,9 @@ async function run() {
 
   // Provider UI must preserve all fetched choices after each model toggle.
   const view = load('src/components/CustomTranslatorManager.vue', {
+    electron: {ipcRenderer: {invoke: async () => ({ok: true, models: ['model-a', 'model-b', 'model-c']})}},
     '@/common/translate/custom-translators': {customTranslatorManager: manager},
-    '@/common/translate/model-fetcher': {fetchModels: async () => ['model-a', 'model-b', 'model-c']},
+    '@/common/translate/provider-config': load('src/common/translate/provider-config.ts'),
     '@/common/translate/provider-templates': {providerTemplates: [], getProviderTemplate: () => undefined},
     '@/common/event-bus': {__esModule: true, default: {at() {}}},
   }, 'renderer').default.options;

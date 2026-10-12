@@ -36,6 +36,7 @@ import { tracker } from "./tracker";
 import { selectionPopup } from "./selection-popup";
 import { macIntegration } from "./mac-integration";
 import { clipboard } from "./clipboard";
+import { registerProviderAPI } from "./provider-api";
 
 class Controller extends MainController {
   readonly selectionPopup = selectionPopup;
@@ -55,6 +56,7 @@ class Controller extends MainController {
     observers.push(this);
     observers.push(this.transCon);
     this.bindLinks(actionLinks);
+    registerProviderAPI(sender => sender === this.win.windows.get("settings")?.webContents);
     const requireSelectionUI = (sender: Electron.WebContents) => {
       if (!["settings", "contrast"].some(name => sender === this.win.windows.get(name as RouteActionType)?.webContents)) {
         throw new Error("Selection controls require a trusted application window");

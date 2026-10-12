@@ -13,6 +13,7 @@ import {
   Shortcuts,
   loadLocalShortcuts,
   loadGlobalShortcuts,
+  defaultLocalShortcuts,
   resetFile,
 } from "../common/shortcuts";
 import { env } from "../common/env";
@@ -134,9 +135,20 @@ class ShortcutManager {
 
   registerLocalShortcuts() {
     const menu = new Menu();
-    for (const [key, accelerator] of this.localShortcuts.entries()) {
-      menu.append(new MenuItem(this.getMenuItemOptions(key, accelerator)));
+    const edit = new Menu();
+    const actions = new Menu();
+    const editRoles = ["undo", "redo", "cut", "copy", "paste", "selectAll"];
+    const shortcuts = new Map([...defaultLocalShortcuts, ...this.localShortcuts]);
+    if (process.platform === "darwin") {
+      menu.append(new MenuItem({ role: "appMenu" }));
     }
+    for (const [key, accelerator] of shortcuts) {
+      const item = new MenuItem(this.getMenuItemOptions(key, accelerator));
+      (editRoles.includes(key) ? edit : actions).append(item);
+    }
+    // macOS only dispatches native editing roles reliably inside a submenu.
+    menu.append(new MenuItem({ role: "editMenu", submenu: edit }));
+    menu.append(new MenuItem({ label: "CopyTranslator", submenu: actions }));
     Menu.setApplicationMenu(menu);
   }
 }

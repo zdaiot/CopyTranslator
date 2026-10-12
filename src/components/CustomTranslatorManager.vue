@@ -21,8 +21,8 @@
           {{ trans["aiTranslatorDescription"] || "这些翻译器基于人工智能（大语言模型/LLM），可以理解上下文并提供更自然的翻译。所有在此处添加的供应商都需要您自行配置API密钥。" }}
         </v-alert>
         <ol class="setup-steps">
-          <li>{{ isChinese ? '添加供应商，填写 API 地址和 API Key（支持 OpenAI 兼容接口）。' : 'Add a provider with its API URL and API key (OpenAI-compatible API).' }}</li>
-          <li>{{ isChinese ? '获取模型列表并点击启用；也可以在下方手动添加模型 ID。' : 'Fetch and enable models, or add a model ID manually below.' }}</li>
+          <li>{{ isChinese ? '添加供应商，填写 API 地址并粘贴 API 密钥（支持 OpenAI 兼容接口）。' : 'Add a provider with its API URL and API key (OpenAI-compatible API).' }}</li>
+          <li>{{ isChinese ? '在添加窗口获取模型列表并选择模型，测试连接后保存；也可手动输入模型 ID。' : 'Fetch and select models in the dialog, test the connection, then save. Manual model IDs are also supported.' }}</li>
           <li>{{ isChinese ? '在主界面或划词浮窗的引擎菜单中选择该模型，即可翻译。主界面选择 AI 模型后，单词和句子均使用 AI 翻译。' : 'Choose the model from either engine menu. Selecting an AI model in the main window uses AI for both words and sentences.' }}</li>
         </ol>
         <!-- 供应商列表 -->
@@ -156,7 +156,7 @@
     </v-card>
 
     <!-- 添加/编辑供应商对话框 -->
-    <v-dialog v-model="showAddProviderDialog" max-width="600px" persistent>
+    <v-dialog v-model="showAddProviderDialog" max-width="640px" persistent scrollable>
       <v-card>
         <v-card-title>
           {{ editingProvider ? (trans["editAIProvider"] || "编辑AI供应商") : (trans["addAIProvider"] || "添加AI供应商") }}
@@ -196,6 +196,7 @@
             <!-- API Base URL -->
             <v-text-field
               v-model="providerForm.apiBase"
+              @input="invalidateDraftConnection"
               :label="trans['apiBase'] || 'API Base URL'"
               :rules="[rules.required]"
               :hint="isChinese ? '填写接口基础地址，例如 https://api.example.com/v1，不含 /chat/completions' : 'API base URL, e.g. https://api.example.com/v1, without /chat/completions'"
@@ -207,12 +208,48 @@
             <!-- API Key -->
             <v-text-field
               v-model="providerForm.apiKey"
+              @input="invalidateDraftConnection"
               :label="trans['apiKey'] || 'API Key'"
               :rules="[rules.required]"
               type="password"
+              autocomplete="new-password"
+              :spellcheck="false"
               outlined
               dense
-            ></v-text-field>
+            >
+              <template v-slot:append>
+                <v-btn text x-small color="primary" @click="pasteApiKey">{{ isChinese ? '粘贴' : 'Paste' }}</v-btn>
+              </template>
+            </v-text-field>
+
+            <div class="model-picker-heading">
+              <span>{{ isChinese ? '翻译模型' : 'Translation models' }}</span>
+              <v-btn small text color="primary" :loading="fetchingDraftModels" :disabled="!canConnect" @click="fetchDraftModels">
+                <v-icon small left>mdi-refresh</v-icon>{{ isChinese ? '获取模型列表' : 'Fetch model list' }}
+              </v-btn>
+            </div>
+            <v-combobox
+              v-model="providerForm.enabledModels" :items="draftModelItems" :search-input.sync="draftModelSearch"
+              :label="isChinese ? '选择模型或输入模型 ID' : 'Select models or enter model IDs'"
+              :hint="isChinese ? '可多选。没有列表时，输入准确的模型 ID 并按回车。' : 'Select one or more models, or type an exact model ID and press Enter.'"
+              :no-data-text="isChinese ? '点击获取模型列表，或输入模型 ID' : 'Fetch models or type a model ID'"
+              multiple small-chips deletable-chips :return-object="false" clearable outlined dense persistent-hint
+              @change="draftModelsChanged"
+            ></v-combobox>
+            <p v-if="draftModelNotice" class="caption mt-1" role="status">{{ draftModelNotice }}</p>
+            <v-alert v-if="draftModelError" type="warning" dense text class="mt-2" role="alert">{{ draftModelError }}</v-alert>
+            <v-select v-if="providerForm.enabledModels.length > 1" :value="draftTestModelId" :items="providerForm.enabledModels"
+              :label="isChinese ? '用于测试的模型' : 'Model to test'" outlined dense hide-details class="mt-3"
+              @change="draftTestModel = $event; invalidateDraftTest()"
+            ></v-select>
+            <div class="connection-test">
+              <v-btn small outlined color="primary" :loading="testingDraft" :disabled="!canConnect || !hasDraftModel" @click="testDraftConnection">
+                {{ isChinese ? '测试连接' : 'Test connection' }}
+              </v-btn>
+              <span class="caption">{{ isChinese ? '发送一次简短的模型请求，可能消耗少量额度。' : 'Sends a short model request; a small usage charge may apply.' }}</span>
+            </div>
+            <v-alert v-if="draftTestResult" type="success" dense text role="status">{{ draftTestResult }}</v-alert>
+            <v-alert v-if="draftTestError" type="error" dense text role="alert">{{ draftTestError }}</v-alert>
 
             <!-- 高级配置 -->
             <v-expansion-panels flat>
@@ -227,6 +264,7 @@
                     </label>
                     <v-slider
                       v-model="providerForm.config.temperature"
+                      @change="invalidateDraftTest"
                       min="0"
                       max="1"
                       step="0.1"
@@ -238,6 +276,7 @@
 
                   <v-text-field
                     v-model.number="providerForm.config.maxTokens"
+                    @input="invalidateDraftTest"
                     :label="trans['maxTokens'] || '最大Token数'"
                     type="number"
                     outlined
@@ -256,6 +295,7 @@
               </v-expansion-panel>
             </v-expansion-panels>
           </v-form>
+          <v-alert v-if="formError" type="error" dense text role="alert">{{ formError }}</v-alert>
         </v-card-text>
 
         <v-card-actions>
@@ -263,10 +303,10 @@
           <v-btn text @click="closeProviderDialog">{{ trans["cancel"] || "取消" }}</v-btn>
           <v-btn
             color="primary"
-            :disabled="!formValid"
+            :disabled="!formValid || !hasDraftModel"
             @click="saveProvider"
           >
-            {{ trans["ok"] || "确定" }}
+            {{ isChinese ? '保存并启用' : 'Save & enable' }}
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -342,8 +382,9 @@
 
 <script lang="ts">
 import { Component, Vue } from "vue-property-decorator";
+import { clipboard, ipcRenderer } from "electron";
 import { customTranslatorManager } from "@/common/translate/custom-translators";
-import { fetchModels } from "@/common/translate/model-fetcher";
+import { normalizeProviderConnection, normalizeModelIds } from "@/common/translate/provider-config";
 import { ProviderConfig } from "@/common/translate/types";
 import { providerTemplates, getProviderTemplate } from "@/common/translate/provider-templates";
 import eventBus from "@/common/event-bus";
@@ -364,6 +405,18 @@ export default class CustomTranslatorManagerView extends Vue {
   formValid = false;
   editingProvider: ProviderConfig | null = null;
   selectedTemplate = "";
+  draftModels: string[] = [];
+  draftModelSearch = "";
+  draftModelError = "";
+  draftModelNotice = "";
+  fetchingDraftModels = false;
+  modelRequestVersion = 0;
+  draftTestModel = "";
+  testingDraft = false;
+  testRequestVersion = 0;
+  draftTestResult = "";
+  draftTestError = "";
+  formError = "";
   
   // 测试相关
   testing = false;
@@ -398,6 +451,82 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   get isChinese() { return String(this.trans.localeName).includes("中文"); }
+  get canConnect() { return !!this.providerForm.apiBase.trim() && !!this.providerForm.apiKey.trim(); }
+  get hasDraftModel() { return this.providerForm.enabledModels.length > 0 || !!this.draftModelSearch?.trim(); }
+  get draftModelItems() { return normalizeModelIds([...this.draftModels, ...this.providerForm.enabledModels]); }
+  get draftTestModelId() { return this.providerForm.enabledModels.includes(this.draftTestModel) ? this.draftTestModel : this.providerForm.enabledModels[0] || ""; }
+
+  invalidateDraftTest() {
+    this.testRequestVersion++;
+    this.testingDraft = false;
+    this.draftTestResult = "";
+    this.draftTestError = "";
+  }
+
+  invalidateDraftConnection() {
+    this.modelRequestVersion++;
+    this.fetchingDraftModels = false;
+    this.draftModels = [];
+    this.draftModelError = "";
+    this.draftModelNotice = "";
+    this.formError = "";
+    this.invalidateDraftTest();
+  }
+
+  pasteApiKey() {
+    const key = clipboard.readText().trim();
+    if (!key) { this.formError = this.isChinese ? "剪贴板没有可粘贴的文本。" : "The clipboard has no text to paste."; return; }
+    this.providerForm.apiKey = key;
+    this.invalidateDraftConnection();
+  }
+
+  draftModelsChanged() {
+    this.providerForm.enabledModels = normalizeModelIds(this.providerForm.enabledModels);
+    this.invalidateDraftTest();
+  }
+
+  commitDraftModelSearch() {
+    this.providerForm.enabledModels = normalizeModelIds([...this.providerForm.enabledModels, this.draftModelSearch]);
+    this.draftModelSearch = "";
+  }
+
+  async fetchDraftModels() {
+    if (this.fetchingDraftModels || !this.canConnect) return;
+    const version = ++this.modelRequestVersion;
+    this.fetchingDraftModels = true;
+    this.draftModelError = "";
+    this.draftModelNotice = "";
+    try {
+      const result = await ipcRenderer.invoke("ai-provider:models", { apiBase: this.providerForm.apiBase, apiKey: this.providerForm.apiKey });
+      if (version !== this.modelRequestVersion) return;
+      if (!result.ok) { this.draftModelError = result.error; return; }
+      this.draftModels = normalizeModelIds(result.models);
+      this.draftModelNotice = this.draftModels.length
+        ? (this.isChinese ? `已获取 ${this.draftModels.length} 个模型，请在下拉框中选择支持文本对话的模型。` : `Fetched ${this.draftModels.length} models. Choose a text chat model from the list.`)
+        : (this.isChinese ? "服务未返回模型。可手动填写模型 ID 后测试连接。" : "No models returned. Enter a model ID manually and test it.");
+    } catch { if (version === this.modelRequestVersion) this.draftModelError = this.isChinese ? "获取失败，请重试；也可手动填写模型 ID。" : "Could not fetch models. Retry or enter a model ID."; }
+    finally { if (version === this.modelRequestVersion) this.fetchingDraftModels = false; }
+  }
+
+  async testDraftConnection() {
+    if (this.testingDraft || !this.canConnect || !this.hasDraftModel) return;
+    this.commitDraftModelSearch();
+    const version = ++this.testRequestVersion;
+    this.testingDraft = true;
+    this.draftTestResult = "";
+    this.draftTestError = "";
+    try {
+      const result = await ipcRenderer.invoke("ai-provider:test", {
+        apiBase: this.providerForm.apiBase, apiKey: this.providerForm.apiKey, config: { ...this.providerForm.config },
+      }, this.draftTestModelId);
+      if (version !== this.testRequestVersion) return;
+      if (!result.ok) { this.draftTestError = result.error; return; }
+      this.draftTestResult = `${this.isChinese ? '连接成功' : 'Connected'} · ${result.model} · ${(result.elapsedMs / 1000).toFixed(1)}s\n${result.text}`;
+    } catch { if (version === this.testRequestVersion) this.draftTestError = this.isChinese ? "测试失败，请重试。" : "The test failed. Please retry."; }
+    finally { if (version === this.testRequestVersion) this.testingDraft = false; }
+  }
+
+  beforeDestroy() { this.invalidateDraftConnection(); }
 
   get templateItems() {
    return providerTemplates.map(t => {
@@ -459,6 +588,10 @@ export default class CustomTranslatorManagerView extends Vue {
       
       // 清空已获取的模型
       this.providerForm.enabledModels = [];
+      this.providerForm.apiKey = "";
+      this.draftModelSearch = "";
+      this.draftTestModel = "";
+      this.invalidateDraftConnection();
     }
   }
 
@@ -472,7 +605,9 @@ export default class CustomTranslatorManagerView extends Vue {
     provider.modelFetchError = "";
 
     try {
-      const models = await fetchModels(provider.apiBase, provider.apiKey);
+      const result = await ipcRenderer.invoke("ai-provider:models", { apiBase: provider.apiBase, apiKey: provider.apiKey });
+      if (!result.ok) throw new Error(result.error);
+      const models = normalizeModelIds(result.models);
       
       if (models.length === 0) {
         // 使用推荐模型作为后备
@@ -516,8 +651,10 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   editProvider(provider: ProviderConfig) {
+    this.invalidateDraftConnection();
     this.editingProvider = provider;
     this.providerForm = JSON.parse(JSON.stringify(provider));
+    this.providerForm.config = { temperature: 0.3, maxTokens: 4000, prompt: "", ...this.providerForm.config };
     this.selectedTemplate = "";
     this.showAddProviderDialog = true;
   }
@@ -532,6 +669,11 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   saveProvider() {
+    this.commitDraftModelSearch();
+    if (!(this.$refs.form as any).validate() || !this.providerForm.enabledModels.length) return;
+    try { Object.assign(this.providerForm, normalizeProviderConnection(this.providerForm.apiBase, this.providerForm.apiKey)); }
+    catch (error) { this.formError = error.message; return; }
+    this.providerForm.name = this.providerForm.name.trim();
     // 确保有必要字段
     if (!this.providerForm.config) {
       this.providerForm.config = {
@@ -541,9 +683,10 @@ export default class CustomTranslatorManagerView extends Vue {
       };
     }
 
+    let saved: boolean;
     if (this.editingProvider) {
       // 更新现有供应商
-      customTranslatorManager.updateProvider(
+      saved = customTranslatorManager.updateProvider(
         this.editingProvider.id,
         this.providerForm
       );
@@ -564,9 +707,9 @@ export default class CustomTranslatorManagerView extends Vue {
       
       // 生成唯一 ID
       this.providerForm.id = customTranslatorManager.generateUniqueProviderId(baseId);
-      customTranslatorManager.addProvider(this.providerForm);
+      saved = customTranslatorManager.addProvider(this.providerForm);
     }
-    
+    if (!saved) { this.formError = this.isChinese ? "保存失败，请重试。" : "Could not save. Please retry."; return; }
     this.loadProviders();
     this.expandedProviders = [this.providers.findIndex(provider => provider.id === this.providerForm.id)];
     this.closeProviderDialog();
@@ -574,6 +717,7 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   closeProviderDialog() {
+    this.invalidateDraftConnection();
     this.showAddProviderDialog = false;
     this.editingProvider = null;
     this.resetProviderForm();
@@ -595,6 +739,8 @@ export default class CustomTranslatorManagerView extends Vue {
       enabled: true,
     };
     this.selectedTemplate = "";
+    this.draftModelSearch = "";
+    this.draftTestModel = "";
   }
 
   testProvider(provider: ProviderWithUI) {
@@ -685,5 +831,7 @@ export default class CustomTranslatorManagerView extends Vue {
 .setup-steps { margin: 0 0 20px; padding-left: 20px; line-height: 1.8; }
 .manual-model { display: flex; align-items: flex-start; gap: 8px; margin-top: 18px; }
 .manual-model .v-btn { margin-top: 4px; flex-shrink: 0; }
+.model-picker-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.connection-test { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
 @media (max-width: 600px) { .manual-model { flex-direction: column; } .manual-model .v-input { width: 100%; } }
 </style>
