@@ -147,6 +147,7 @@ export class CustomTranslatorManager {
         temperature: config.temperature,
         maxTokens: config.maxTokens,
         prompt: config.prompt,
+        stream: config.stream,
       };
       return {
         config: translatorConfig,

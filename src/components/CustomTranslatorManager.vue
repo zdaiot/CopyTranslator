@@ -89,7 +89,7 @@
                       @click="fetchProviderModels(provider)"
                     >
                       <v-icon small left>mdi-refresh</v-icon>
-                      {{ isChinese ? '获取模型' : 'Fetch models' }}
+                      {{ isChinese ? '刷新模型' : 'Refresh models' }}
                     </v-btn>
                   </div>
 
@@ -225,7 +225,7 @@
             <div class="model-picker-heading">
               <span>{{ isChinese ? '翻译模型' : 'Translation models' }}</span>
               <v-btn small text color="primary" :loading="fetchingDraftModels" :disabled="!canConnect" @click="fetchDraftModels">
-                <v-icon small left>mdi-refresh</v-icon>{{ isChinese ? '获取模型列表' : 'Fetch model list' }}
+                <v-icon small left>mdi-refresh</v-icon>{{ draftModels.length ? (isChinese ? '刷新模型列表' : 'Refresh model list') : (isChinese ? '获取模型列表' : 'Fetch model list') }}
               </v-btn>
             </div>
             <v-combobox
@@ -258,6 +258,13 @@
                   {{ trans["advancedConfig"] || "高级配置" }}
                 </v-expansion-panel-header>
                 <v-expansion-panel-content>
+                  <v-switch
+                    :input-value="providerForm.config.stream !== false"
+                    @change="providerForm.config.stream = $event"
+                    :label="isChinese ? '流式显示译文' : 'Stream translations'"
+                    :hint="isChinese ? 'AI 译文逐段显示；接口不支持流式时可关闭。' : 'Show AI translations as they arrive. Turn off for APIs without streaming support.'"
+                    persistent-hint dense
+                  ></v-switch>
                   <div class="mt-2">
                     <label class="caption">
                       {{ trans["temperature"] || "温度" }}: {{ providerForm.config.temperature }}
@@ -390,7 +397,6 @@ import { providerTemplates, getProviderTemplate } from "@/common/translate/provi
 import eventBus from "@/common/event-bus";
 
 interface ProviderWithUI extends ProviderConfig {
-  availableModels?: string[];
   fetchingModels?: boolean;
   modelFetchError?: string;
   manualModel?: string;
@@ -500,10 +506,13 @@ export default class CustomTranslatorManagerView extends Vue {
       const result = await ipcRenderer.invoke("ai-provider:models", { apiBase: this.providerForm.apiBase, apiKey: this.providerForm.apiKey });
       if (version !== this.modelRequestVersion) return;
       if (!result.ok) { this.draftModelError = result.error; return; }
-      this.draftModels = normalizeModelIds(result.models);
-      this.draftModelNotice = this.draftModels.length
-        ? (this.isChinese ? `已获取 ${this.draftModels.length} 个模型，请在下拉框中选择支持文本对话的模型。` : `Fetched ${this.draftModels.length} models. Choose a text chat model from the list.`)
-        : (this.isChinese ? "服务未返回模型。可手动填写模型 ID 后测试连接。" : "No models returned. Enter a model ID manually and test it.");
+      const models = normalizeModelIds(result.models);
+      if (!models.length) {
+        this.draftModelError = this.isChinese ? "服务未返回模型，已保留现有列表。也可手动填写模型 ID。" : "No models returned. Existing choices are preserved; you can also enter a model ID.";
+        return;
+      }
+      this.draftModels = models;
+      this.draftModelNotice = this.isChinese ? `已获取 ${models.length} 个模型，保存后可直接使用此列表。请选择支持文本对话的模型。` : `Fetched ${models.length} models. This list will be saved. Choose a text chat model.`;
     } catch { if (version === this.modelRequestVersion) this.draftModelError = this.isChinese ? "获取失败，请重试；也可手动填写模型 ID。" : "Could not fetch models. Retry or enter a model ID."; }
     finally { if (version === this.modelRequestVersion) this.fetchingDraftModels = false; }
   }
@@ -571,7 +580,7 @@ export default class CustomTranslatorManagerView extends Vue {
       return {
         ...p,
         enabledModels: [...p.enabledModels],
-        availableModels: [...new Set([...(previous?.availableModels || []), ...p.enabledModels])],
+        availableModels: normalizeModelIds([...(p.availableModels || []), ...p.enabledModels]),
         fetchingModels: false,
         modelFetchError: "",
         manualModel: previous?.manualModel || "",
@@ -596,6 +605,7 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   async fetchProviderModels(provider: ProviderWithUI) {
+    if (provider.fetchingModels) return;
     if (!provider.apiBase || !provider.apiKey) {
       provider.modelFetchError = this.trans["apiConfigRequired"] || "请先配置 API Base 和 API Key";
       return;
@@ -603,32 +613,31 @@ export default class CustomTranslatorManagerView extends Vue {
 
     provider.fetchingModels = true;
     provider.modelFetchError = "";
+    const { apiBase, apiKey } = provider;
+    const isCurrent = () => {
+      const current = customTranslatorManager.getProvider(provider.id);
+      return this.providers.includes(provider) && current?.apiBase === apiBase && current?.apiKey === apiKey;
+    };
 
     try {
-      const result = await ipcRenderer.invoke("ai-provider:models", { apiBase: provider.apiBase, apiKey: provider.apiKey });
+      const result = await ipcRenderer.invoke("ai-provider:models", { apiBase, apiKey });
+      if (!isCurrent()) return;
       if (!result.ok) throw new Error(result.error);
       const models = normalizeModelIds(result.models);
-      
-      if (models.length === 0) {
-        // 使用推荐模型作为后备
-        const template = getProviderTemplate(provider.providerType);
-        if (template && template.recommendedModels.length > 0) {
-          provider.availableModels = [...new Set([...provider.enabledModels, ...template.recommendedModels])];
-          provider.modelFetchError = this.trans["usingRecommendedModels"] || "API 未返回模型列表，使用推荐模型";
-        } else {
-          provider.modelFetchError = this.trans["noModelsFound"] || "未找到任何模型";
-          provider.availableModels = [...provider.enabledModels];
-        }
+      if (!models.length) throw new Error(this.isChinese ? "服务未返回模型，已保留现有列表。" : "No models returned. Existing choices are preserved.");
+      const availableModels = normalizeModelIds([...models, ...provider.enabledModels]);
+      if (customTranslatorManager.updateProvider(provider.id, { availableModels })) {
+        provider.availableModels = availableModels;
       } else {
-        provider.availableModels = [...new Set([...provider.enabledModels, ...models])];
+        provider.modelFetchError = this.isChinese ? "模型列表保存失败，请重试。" : "Could not save the model list. Please retry.";
       }
     } catch (error) {
+      if (!isCurrent()) return;
       provider.modelFetchError = error.message || "获取模型列表失败";
-      
-      // 失败时尝试使用推荐模型
-      const template = getProviderTemplate(provider.providerType);
-      if (template && template.recommendedModels.length > 0) {
-        provider.availableModels = [...new Set([...provider.enabledModels, ...template.recommendedModels])];
+      // A failed refresh must not replace previously saved choices.
+      if (!provider.availableModels?.length) {
+        const template = getProviderTemplate(provider.providerType);
+        provider.availableModels = normalizeModelIds([...provider.enabledModels, ...(template?.recommendedModels || [])]);
       }
     } finally {
       provider.fetchingModels = false;
@@ -636,9 +645,13 @@ export default class CustomTranslatorManagerView extends Vue {
   }
 
   updateProviderModels(providerId: string, models: string[]) {
-    if (customTranslatorManager.setEnabledModels(providerId, models)) {
-      const provider = this.providers.find(item => item.id === providerId);
-      if (provider) provider.enabledModels = [...models];
+    const provider = this.providers.find(item => item.id === providerId);
+    if (!provider) return;
+    const enabledModels = normalizeModelIds(models);
+    const availableModels = normalizeModelIds([...(provider.availableModels || []), ...provider.enabledModels, ...enabledModels]);
+    if (customTranslatorManager.updateProvider(providerId, { enabledModels, availableModels })) {
+      provider.enabledModels = enabledModels;
+      provider.availableModels = availableModels;
     }
   }
 
@@ -653,8 +666,10 @@ export default class CustomTranslatorManagerView extends Vue {
   editProvider(provider: ProviderConfig) {
     this.invalidateDraftConnection();
     this.editingProvider = provider;
-    this.providerForm = JSON.parse(JSON.stringify(provider));
+    // Load only persisted fields, without the list panel's temporary UI state.
+    this.providerForm = JSON.parse(JSON.stringify(customTranslatorManager.getProvider(provider.id) || provider));
     this.providerForm.config = { temperature: 0.3, maxTokens: 4000, prompt: "", ...this.providerForm.config };
+    this.draftModels = normalizeModelIds([...(this.providerForm.availableModels || []), ...this.providerForm.enabledModels]);
     this.selectedTemplate = "";
     this.showAddProviderDialog = true;
   }
@@ -674,6 +689,7 @@ export default class CustomTranslatorManagerView extends Vue {
     try { Object.assign(this.providerForm, normalizeProviderConnection(this.providerForm.apiBase, this.providerForm.apiKey)); }
     catch (error) { this.formError = error.message; return; }
     this.providerForm.name = this.providerForm.name.trim();
+    this.providerForm.availableModels = normalizeModelIds([...this.draftModels, ...this.providerForm.enabledModels]);
     // 确保有必要字段
     if (!this.providerForm.config) {
       this.providerForm.config = {

@@ -21,6 +21,7 @@ class SelectionPopup {
   private ready = false;
   private initialized = false;
   private revision = new SelectionRevision();
+  private request?: AbortController;
   private destroyTimer?: NodeJS.Timeout;
   private buttonTimer?: NodeJS.Timeout;
   private anchor: Point = { x: 0, y: 0 };
@@ -118,6 +119,7 @@ class SelectionPopup {
     text = text.trim();
     if (!text) return;
     this.revision.next();
+    this.request?.abort();
     if (this.buttonTimer) clearTimeout(this.buttonTimer);
     this.anchor = point;
     const previousView = this.state.view;
@@ -161,6 +163,8 @@ class SelectionPopup {
 
   private async translate() {
     const revision = this.revision.next();
+    this.request?.abort();
+    const request = this.request = new AbortController();
     const text = this.state.text;
     if (!text) return;
     this.state.status = "loading";
@@ -186,7 +190,14 @@ class SelectionPopup {
       this.state.from = from;
       this.state.to = to;
       this.publish();
-      const result = autoReSegment(await translator.translate(text, from, to));
+      const response = translator.translateStream
+        ? await translator.translateStream(text, from, to, (translation) => {
+          if (!this.revision.current(revision)) return;
+          this.state.translation = translation;
+          this.publish();
+        }, request.signal)
+        : await translator.translate(text, from, to);
+      const result = autoReSegment(response);
       if (!this.revision.current(revision)) return;
       this.state.translation = result.resultString;
       if (!this.state.translation.trim()) throw new Error("翻译服务没有返回译文，请重试或更换引擎。");
@@ -201,6 +212,7 @@ class SelectionPopup {
 
   hide() {
     this.revision.next();
+    this.request?.abort();
     if (this.buttonTimer) clearTimeout(this.buttonTimer);
     this.buttonTimer = undefined;
     this.state.text = "";

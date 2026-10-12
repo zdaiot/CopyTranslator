@@ -141,7 +141,7 @@ export default class BaseView extends Base {
 
   translate() {
     const text = this.getModifiedText();
-    if (text == undefined) {
+    if (text == undefined || !text.trim()) {
       return;
     }
     eventBus.at("dispatch", "translate", text);
@@ -149,6 +149,19 @@ export default class BaseView extends Base {
 
   created() {
     eventBus.on("translateInput", this.translate);
+  }
+
+  beforeDestroy() { eventBus.off("translateInput", this.translate); }
+
+  get inputShortcut() { return process.platform === "darwin" ? "⌘Enter" : "Ctrl+Enter"; }
+  get inputPlaceholder() { return `在此输入或粘贴原文，点击“翻译”或按 ${this.inputShortcut}`; }
+  translateKeydown(event: KeyboardEvent) {
+    if (event.isComposing || event.keyCode === 229 || event.repeat) return;
+    if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      this.translate();
+    }
   }
 
   get appStyle() {

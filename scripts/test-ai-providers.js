@@ -21,7 +21,7 @@ async function run() {
     return {data: {choices: [{message: {content: '测试译文'}}]}};
   }};
   const lib = require('@opentranslate2/translator');
-  const adapter = load('src/common/translate/openai.ts', {'./types': {...lib, BaseTranslator: lib.Translator}});
+  const adapter = load('src/common/translate/openai.ts', {'./types': {...lib, BaseTranslator: lib.Translator}, './chat-stream': load('src/common/translate/chat-stream.ts')});
   const data = {translatorProviders: [], customTranslators: []};
   let manager;
   const config = {
@@ -69,9 +69,10 @@ async function run() {
   assert.equal(renderer.getAllIds().length, 0, 'Renderer metadata also drops disabled models without a restart');
   assert.deepEqual(data.translatorProviders[0].enabledModels, ['model-b'], 'Edits must not mutate the shared store before saving');
 
-  // Provider UI must preserve all fetched choices after each model toggle.
+  // Provider UI must persist all fetched choices across toggles and fresh views.
+  let discover = async () => ({ok: true, models: ['model-a', 'model-b', 'model-c']});
   const view = load('src/components/CustomTranslatorManager.vue', {
-    electron: {ipcRenderer: {invoke: async () => ({ok: true, models: ['model-a', 'model-b', 'model-c']})}},
+    electron: {ipcRenderer: {invoke: (...args) => discover(...args)}},
     '@/common/translate/custom-translators': {customTranslatorManager: manager},
     '@/common/translate/provider-config': load('src/common/translate/provider-config.ts'),
     '@/common/translate/provider-templates': {providerTemplates: [], getProviderTemplate: () => undefined},
@@ -91,6 +92,36 @@ async function run() {
   assert.equal(ctx.providers[0].manualModel, '');
   ctx.loadProviders();
   assert(ctx.providers[0].availableModels.includes('model-b'), 'Refreshing provider UI must retain fetched, unselected models');
+  ctx.updateProviderModels('test-provider', ['model-c']);
+  manager.reload();
+  ctx.providers = []; // A newly mounted settings view has no in-memory cache.
+  ctx.loadProviders();
+  assert.deepEqual(plain(ctx.providers[0].availableModels), ['model-a', 'model-b', 'model-c', 'gateway/custom-model']);
+  assert.deepEqual(data.customTranslators, ['test-provider-model-c'], 'Only enabled models become translators after reload');
+  for (const response of [{ok: false, error: 'offline'}, {ok: true, models: []}]) {
+    discover = async () => response;
+    await ctx.fetchProviderModels(ctx.providers[0]);
+    assert(ctx.providers[0].modelFetchError);
+    manager.reload(); ctx.providers = []; ctx.loadProviders();
+    assert(ctx.providers[0].availableModels.includes('model-b'), 'Failed or empty refresh must retain saved candidates');
+  }
+  discover = async () => ({ok: true, models: ['new-model']});
+  await ctx.fetchProviderModels(ctx.providers[0]);
+  manager.reload(); ctx.providers = []; ctx.loadProviders();
+  assert.deepEqual(plain(ctx.providers[0].availableModels), ['new-model', 'model-c'], 'Explicit refresh persists new results plus currently enabled models');
+
+  let resolveDiscovery;
+  discover = () => new Promise(resolve => {resolveDiscovery = resolve;});
+  let refresh = ctx.fetchProviderModels(ctx.providers[0]);
+  manager.updateProvider('test-provider', {apiKey: 'new-key', availableModels: ['model-c']});
+  ctx.loadProviders();
+  resolveDiscovery({ok: true, models: ['stale-model']}); await refresh;
+  assert.deepEqual(data.translatorProviders[0].availableModels, ['model-c'], 'Old requests cannot overwrite an edited provider');
+  refresh = ctx.fetchProviderModels(ctx.providers[0]);
+  manager.removeProvider('test-provider'); ctx.loadProviders();
+  resolveDiscovery({ok: true, models: ['stale-model']}); await refresh;
+  assert.equal(data.translatorProviders.length, 0, 'A late refresh cannot recreate a deleted provider');
+  manager.addProvider(provider());
 
   // Translation models stay available while smart dictionary is showing a word.
   const Vue = require('vue');
@@ -114,6 +145,6 @@ async function run() {
   manager.removeProvider('test-provider');
   assert.deepEqual(data.customTranslators, []);
   assert.equal(manager.getAllIds().length, 0);
-  console.log('PASS: AI model enable/disable/remove, disabled-provider retention, renderer synchronization, fetched-list preservation, manual model IDs, main menu/dictionary routing, real adapter request and response.');
+  console.log('PASS: AI model enable/disable/remove, renderer synchronization, persisted model choices, refresh failures, stale refreshes, manual IDs, main menu/dictionary routing, real adapter request and response.');
 }
 run().catch(error => { console.error(error); process.exitCode = 1; });

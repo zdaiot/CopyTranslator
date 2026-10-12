@@ -60,6 +60,7 @@ type TranslateOption = {
 };
 
 class TranslateController {
+  private translationRevision = 0;
   translateResult: SharedResult | undefined;
   dictResult: SharedDictResult = emptyDictResult();
 
@@ -263,8 +264,12 @@ class TranslateController {
   }
 
   clear() {
+    this.translationRevision++;
+    this.translator.cancel();
+    this.translating = false;
     this.text = "";
     this.lastAppend = "";
+    this.setCurrentStatus();
     this.clearResult();
   }
 
@@ -508,40 +513,44 @@ class TranslateController {
   }
 
   private async translateWithOption(options: TranslateOption = {}) {
-    if (this.translating) {
-      //保证翻译时不被打断
-      return;
-    }
+    if (!(options.text ?? this.text).trim()) return;
+    const revision = ++this.translationRevision;
+    this.translator.cancel();
     this.nextEngines = options.engines;
+    this.translating = true;
+    this.setStatus("Translating");
     if (options.clearResult) {
       this.clearResult(); //在这里只清理结果，因为可能需要source做增量
     }
-    this.translating = true;
-    this.setStatus("Translating");
 
     if (options.text) {
       await this.preTranslate(options.text); //设置字体之后就不应该再使用text了
+      if (revision !== this.translationRevision) return;
       logger.debug("tryTranslate", options.text);
     }
+    store.dispatch("setShared", emptySharedResult({ text: this.text, status: "Translating" }));
     if (options.updateLanguage) {
-      await this.updateLanguage();
+      const language = await this.decideLanguage(this.text);
+      if (revision !== this.translationRevision) return;
+      this.language = language;
     }
-    this.realTranslate(true, options.dict);
+    this.realTranslate(true, options.dict, revision);
   }
 
-  realTranslate(correct: boolean = false, dict: boolean = false) {
+  realTranslate(correct: boolean = false, dict: boolean = false, revision = this.translationRevision) {
     if (!correct) {
       throw "incorrect call";
     }
 
     const engines = this.nextEngines;
     this.nextEngines = undefined;
-    let tasks = [this.translateSentence(engines)];
+    let tasks = [this.translateSentence(engines, revision)];
     if (dict && this.needDict) {
-      tasks.push(this.queryDictionary());
+      tasks.push(this.queryDictionary(revision));
     }
 
     Promise.allSettled(tasks).then(() => {
+      if (revision !== this.translationRevision) return;
       this.translating = false;
       this.setCurrentStatus(this.translateResult == undefined);
     });
@@ -589,10 +598,11 @@ class TranslateController {
     logger.debug(text);
   }
 
-  async queryDictionary() {
+  async queryDictionary(revision = this.translationRevision) {
     return this.dictionary
       .query(this.text)
       .then((res) => {
+        if (revision !== this.translationRevision) return;
         if (res.explains.length != 0) {
           this.dictResult = {
             ...res,
@@ -608,7 +618,7 @@ class TranslateController {
       });
   }
 
-  async translateSentence(overrideEngines?: (TranslatorType | string)[]) {
+  async translateSentence(overrideEngines?: (TranslatorType | string)[], revision = this.translationRevision) {
     const language = this.language;
     if (language.source == language.target) {
       return;
@@ -638,12 +648,19 @@ class TranslateController {
     }
     engines.sort();
     return this.translator
-      .translate(this.text, language.source, language.target, engines)
+      .translate(this.text, language.source, language.target, engines, (result) => {
+        if (revision !== this.translationRevision) return;
+        // Progress only updates the view. Clipboard, notifications and caches
+        // receive a completed translation through postTranslate below.
+        store.dispatch("setShared", result);
+      })
       .then((res) => {
+        if (revision !== this.translationRevision) return;
         this.postTranslate(res, language);
         tracker.track("query", "default");
       })
       .catch((err) => {
+        if (revision !== this.translationRevision) return;
         this.translateResult = undefined;
         this.sync();
         logger.error(err);
@@ -658,6 +675,9 @@ class TranslateController {
   }
 
   async switchTranslator(value: TranslatorType | string) {
+    this.translationRevision++;
+    this.translator.cancel();
+    this.translating = false;
     let valid = true;
     this.translator.setMainEngine(value);
 
@@ -685,6 +705,7 @@ class TranslateController {
         }
         logger.debug("cache hit");
         this.postTranslate(buffer);
+        this.setCurrentStatus();
       } catch (e) {
         logger.debug(e);
         this.translateWithOption({});

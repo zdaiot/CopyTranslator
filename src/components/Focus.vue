@@ -1,20 +1,33 @@
 <template>
   <div
+    class="focus-container"
     :style="focusContainerStyle"
     @wheel="wheelHandler($event, 'result')"
     @keydown.ctrl.187="keyboardFontHandler($event, 'result')"
     @keydown.ctrl.189="keyboardFontHandler($event, 'result')"
   >
+    <div class="input-toolbar">
+      <v-btn x-small text @click="editingSource = !editingSource">{{ editingSource ? '返回译文' : '输入原文' }}</v-btn>
+      <v-btn v-if="editingSource || mode === 'none'" x-small text color="primary" :disabled="!sourceText.trim()" @click="translate">翻译 · {{ inputShortcut }}</v-btn>
+    </div>
     <div
-      class="max"
-      @keyup.ctrl.13.capture="translate"
+      class="max focus-content"
+      @keydown="translateKeydown"
       @keyup.ctrl.71.capture="google"
       @keyup.ctrl.66.capture="baidu"
       @keyup.ctrl.80.capture="command"
       v-on:drop="dragTranslate"
     >
+        <textarea
+          v-if="editingSource || mode === 'none'"
+          class="focusText max focusPadding"
+          v-model="sourceText"
+          :style="focusStyle"
+          :placeholder="inputPlaceholder"
+          aria-label="原文，可直接输入或粘贴"
+        ></textarea>
         <div
-          v-if="(mode === 'normal'|| mode==='none')"
+          v-else-if="mode === 'normal'"
           class="focusPadding"
           style="height: 100%;"
           v-bind:style="focusStyle"
@@ -81,8 +94,9 @@
 <script lang="ts">
 import BaseView from "./BaseView.vue";
 import DictResultPanel from "./DictResult.vue";
-import { Mixins, Ref, Component } from "vue-property-decorator";
+import { Mixins, Ref, Component, Watch } from "vue-property-decorator";
 import DiffTextArea from "./DiffTextArea.vue";
+import eventBus from "@/common/event-bus";
 
 @Component({
   components: {
@@ -91,6 +105,23 @@ import DiffTextArea from "./DiffTextArea.vue";
   },
 })
 export default class FocusMode extends Mixins(BaseView) {
+  editingSource = false;
+  sourceText = "";
+  private submittedText = "";
+
+  @Watch("sharedResult.text", { immediate: true })
+  syncSourceText(text: string) {
+    if (this.status === "Translating" && (!text || text === this.submittedText)) return;
+    this.sourceText = text || "";
+  }
+
+  translate() {
+    const text = this.getModifiedText();
+    if (!text?.trim()) return;
+    this.submittedText = text;
+    this.editingSource = false;
+    eventBus.at("dispatch", "translate", text);
+  }
   dragTranslate(event: any) {
     console.log(event.dataTransfer.getData("text/plain"));
   }
@@ -120,6 +151,7 @@ export default class FocusMode extends Mixins(BaseView) {
   }
 
   getModifiedText() {
+    if (this.editingSource || this.mode === "none") return this.sourceText;
     let text: string | undefined;
     switch (this.mode) {
       case "diff":
@@ -148,6 +180,10 @@ export default class FocusMode extends Mixins(BaseView) {
 </script>
 
 <style scoped>
+.focus-container { display: flex; flex-direction: column; }
+.input-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 4px 10px; flex-shrink: 0; border-bottom: 1px solid rgba(128, 128, 128, .16); }
+.focus-content { flex: 1; min-height: 0; }
+.focus-content textarea::placeholder { font-size: 14px; opacity: .65; }
 .focusText {
   resize: none;
   line-height: var(--content-line-height);

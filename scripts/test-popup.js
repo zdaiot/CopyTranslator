@@ -8,7 +8,7 @@ const controller = {handle: (...args) => settingsActions.push(args)};
 function load(file, mocks) {
   const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2019}}).outputText;
   const module = {exports:{}};
-  vm.runInNewContext(code,{module,exports:module.exports,require:id=>mocks[id] || require(id),process,console,setTimeout:(fn,ms)=>setTimeout(fn,ms===30000?100:ms),clearTimeout,global:{controller}},{filename:file});
+  vm.runInNewContext(code,{module,exports:module.exports,require:id=>mocks[id] || require(id),process,console,AbortController,setTimeout:(fn,ms)=>setTimeout(fn,ms===30000?100:ms),clearTimeout,global:{controller}},{filename:file});
   return module.exports;
 }
 let window, handlers = {}, requests = [];
@@ -24,7 +24,7 @@ const utils=load('src/main/selection-utils.ts',{});
 const {selectionPopup:popup}=load('src/main/selection-popup.ts',{
   electron:{app:{isPackaged:false},BrowserWindow:FakeWindow,ipcMain:{handle:(name,fn)=>{handlers[name]=fn;}},screen:{getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}},
   '@/common/configuration':{__esModule:true,default:{get:key=>values[key]}},
-  '@/common/translate/translators':{getTranslator:id=>({translate:text=>new Promise((resolve,reject)=>requests.push({id,text,resolve,reject}))}),getEnabledWithCustomIds:()=>['mock', ...values.customTranslators],hasTranslator:id=>['mock', ...values.customTranslators].includes(id)},
+  '@/common/translate/translators':{getTranslator:id=>({translate:text=>new Promise((resolve,reject)=>requests.push({id,text,resolve,reject})), ...(id === 'provider-model' ? {translateStream: (text, from, to, progress, signal) => new Promise((resolve,reject)=>requests.push({id,text,resolve,reject,progress,signal}))} : {})}),getEnabledWithCustomIds:()=>['mock', ...values.customTranslators],hasTranslator:id=>['mock', ...values.customTranslators].includes(id)},
   '@/common/translate/translator-name-resolver':{TranslatorNameResolver:{getDisplayName:id=>id,isCustomTranslator:id=>values.customTranslators.includes(id)}},
   '@/common/translate/helper':{autoReSegment:value=>({resultString:value}),normalizeAppend:text=>text},
   './clipboard':{clipboard:{writeText:()=>{}}},'./selection-utils':utils,
@@ -85,11 +85,24 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   await wait(150); assert.equal(requests.length, beforeAI, 'Reject unlisted engines');
   await handlers['selection-popup:action']({sender:window.webContents}, 'engine', 'provider-model');
   await wait(150); assert.equal(requests[beforeAI].id, 'provider-model', 'Send translation to the selected AI model');
+  requests[beforeAI].progress('AI partial');
+  assert.equal(window.state.translation, 'AI partial'); assert.equal(window.state.status, 'loading');
   requests[beforeAI].resolve('AI result'); await wait(0);
+  assert.equal(window.state.status, 'done');
+  popup.show('stream to cancel', {x: 500, y: 500}); await wait(150);
+  const cancelled = requests.at(-1);
+  popup.show('newer selection', {x: 500, y: 500}); await wait(150);
+  assert(cancelled.signal.aborted, 'Replacing a selection cancels the old network stream');
+  cancelled.progress('stale chunk'); cancelled.resolve('stale completion'); await wait(0);
+  assert.notEqual(window.state.translation, 'stale chunk'); assert.notEqual(window.state.translation, 'stale completion');
+  const newest = requests.at(-1);
+  newest.progress('new partial'); assert.equal(window.state.translation, 'new partial');
   await handlers['selection-popup:action']({sender:{}}, 'ai-settings');
   assert.equal(settingsActions.length, 0, 'Reject settings actions from other renderers');
   await handlers['selection-popup:action']({sender:window.webContents}, 'ai-settings');
   assert.deepEqual(settingsActions, [['settings', 'customTranslators']]); assert(!window.visible);
+  assert(newest.signal.aborted, 'Closing a popup cancels a running stream');
+  newest.resolve('ignored after close'); await wait(0); assert(!window.visible);
   popup.stop();
   console.log('PASS: popup IPC isolation, stale replies, pin/outside close, dismissed requests, translation errors, button gating/focus/resize, pinned button behavior, shortcut-only/direct/disabled modes, AI engine routing and setup IPC.');
 })().catch(error=>{popup.stop();console.error(error);process.exitCode=1;});

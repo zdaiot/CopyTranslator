@@ -25,6 +25,10 @@ export interface Translator {
     to: Language,
     config?: any
   ): Promise<TranslateResult>;
+  translateStream?(
+    text: string, from: Language, to: Language,
+    onProgress: (text: string) => void, signal?: AbortSignal
+  ): Promise<TranslateResult>;
   detect(text: string): Promise<Language>;
   getSupportLanguages(): Language[];
 }
@@ -64,6 +68,9 @@ export interface OpenAIConfig {
   temperature?: number; // 温度参数，默认为 0.3
   maxTokens?: number; // 最大生成token数，默认为 2000
   translatorName?: string; // 翻译器名称
+  stream?: boolean;
+  onProgress?: (text: string) => void;
+  signal?: AbortSignal;
 }
 
 /**
@@ -77,11 +84,13 @@ export interface ProviderConfig {
   apiBase: string; // API 基础地址
   apiKey: string; // API 密钥
   enabledModels: string[]; // 已启用的模型列表，如 ["gpt-4", "gpt-3.5-turbo"]
+  availableModels?: string[]; // 已获取或手动添加的候选模型；保存列表不代表启用
   config?: {
     // 可选的默认配置，会应用到所有模型
     temperature?: number;
     maxTokens?: number;
     prompt?: string;
+    stream?: boolean;
   };
   enabled?: boolean; // 是否启用该供应商（默认true）
 }

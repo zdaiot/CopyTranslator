@@ -75,6 +75,13 @@ async function run() {
     '@/common/translate/provider-config': config,
     '@/common/translate/custom-translators': {customTranslatorManager: {
       addProvider: value => {saves++; savedProviders.push(plain(value)); return true;},
+      getProvider: id => savedProviders.find(p => p.id === id),
+      updateProvider: (id, updates) => {
+        const index = savedProviders.findIndex(p => p.id === id);
+        if (index < 0) return false;
+        savedProviders[index] = {...savedProviders[index], ...plain(updates)};
+        return true;
+      },
       generateUniqueProviderId: base => base + '-test', getAllProviders: () => savedProviders,
     }},
     '@/common/translate/provider-templates': {providerTemplates: [], getProviderTemplate: () => undefined},
@@ -113,6 +120,51 @@ async function run() {
   assert.equal(ctx.showAddProviderDialog, false);
   assert.equal(ctx.providerForm.apiKey, '', 'Closing a saved draft clears credentials from the form');
 
+  // Discovery in the add dialog is saved with the provider, including choices
+  // that were not enabled. Returning to either view needs no second API call.
+  ctx.providerForm = {...provider, id: '', name: 'Cached provider', providerType: 'custom', enabledModels: ['chat-a']};
+  let discoveries = 0;
+  invoke = async () => {discoveries++; return {ok: true, models: ['chat-a', 'chat-b', 'chat-c']};};
+  await ctx.fetchDraftModels();
+  invoke = async () => ({ok: false, error: 'offline'});
+  await ctx.fetchDraftModels();
+  assert.deepEqual(plain(ctx.draftModels), ['chat-a', 'chat-b', 'chat-c'], 'Failed draft refresh preserves the last successful list');
+  invoke = async () => ({ok: true, models: []});
+  await ctx.fetchDraftModels();
+  assert.deepEqual(plain(ctx.draftModels), ['chat-a', 'chat-b', 'chat-c'], 'Empty responses must not erase saved choices');
+  invoke = async () => {throw new Error('Unexpected network call while reopening');};
+  ctx.saveProvider();
+  assert.deepEqual(savedProviders[1].availableModels, ['chat-a', 'chat-b', 'chat-c']);
+  assert.deepEqual(savedProviders[1].enabledModels, ['chat-a'], 'Discovered models are not automatically enabled');
+  ctx.providers = [];
+  ctx.loadProviders();
+  assert.deepEqual(plain(ctx.providers[1].availableModels), ['chat-a', 'chat-b', 'chat-c']);
+  ctx.editProvider(ctx.providers[1]);
+  assert.deepEqual(plain(ctx.draftModelItems), ['chat-a', 'chat-b', 'chat-c']);
+  ctx.providerForm.name = 'Renamed cached provider';
+  ctx.providerForm.enabledModels = ['chat-b'];
+  ctx.saveProvider();
+  assert.deepEqual(savedProviders[1].availableModels, ['chat-a', 'chat-b', 'chat-c'], 'Non-connection edits preserve the candidate list');
+  assert.deepEqual(savedProviders[1].enabledModels, ['chat-b']);
+  assert.equal(discoveries, 1);
+  assert.equal('fetchingModels' in savedProviders[1], false, 'Transient UI state is never persisted');
+
+  ctx.editProvider(ctx.providers[1]);
+  ctx.providerForm.apiKey = 'replacement-key'; ctx.invalidateDraftConnection();
+  ctx.saveProvider();
+  assert.deepEqual(savedProviders[1].availableModels, ['chat-b'], 'Changing credentials drops old candidates but preserves the selected model');
+  ctx.editProvider(ctx.providers[1]);
+  ctx.providerForm.apiBase = 'https://another.test/v1'; ctx.invalidateDraftConnection();
+  invoke = async () => ({ok: true, models: ['new-a', 'new-b']});
+  await ctx.fetchDraftModels();
+  ctx.providerForm.enabledModels = ['new-a'];
+  ctx.saveProvider();
+  assert.deepEqual(savedProviders[1].availableModels, ['new-a', 'new-b'], 'A new endpoint saves only its own fetched list');
+  ctx.editProvider(ctx.providers[1]);
+  ctx.providerForm.apiBase = 'https://third.test/v1'; ctx.invalidateDraftConnection();
+  ctx.saveProvider();
+  assert.deepEqual(savedProviders[1].availableModels, ['new-a'], 'Endpoint edits without discovery also invalidate old choices');
+
   // Native editing roles must be nested in a menu on macOS; saved custom
   // accelerators and deliberately disabled shortcuts are preserved on both OSes.
   for (const platform of ['darwin', 'win32']) {
@@ -130,6 +182,6 @@ async function run() {
     manager.localShortcuts.set('paste', ''); manager.registerLocalShortcuts();
     assert.equal(appMenu.items.find(item => item.role === 'editMenu').submenu.items.find(item => item.role === 'paste').accelerator, '');
   }
-  console.log('PASS: provider discovery, real request shape, sanitized errors, timeouts, trusted IPC, draft testing, stale responses, manual model IDs, paste and native edit menus.');
+  console.log('PASS: provider discovery, request shape, sanitized errors, timeouts, trusted IPC, draft testing, add/save/reopen model persistence, connection changes, stale responses, manual IDs, paste and native edit menus.');
 }
 run().catch(error => {console.error(error); process.exitCode = 1;});

@@ -7,25 +7,27 @@
       style="margin: 0px; display: flex;"
     >
       <div
-        class="areaWarpper"
+        class="areaWarpper source-pane"
         v-bind:style="leftStyle"
         @wheel="wheelHandler($event, 'source')"
         @keydown.ctrl.187="keyboardFontHandler($event, 'source')"
         @keydown.ctrl.189="keyboardFontHandler($event, 'source')"
       >
+        <div class="source-toolbar"><span>原文</span><v-btn x-small text color="primary" :disabled="!sourceText.trim()" @click="translate">翻译 · {{ inputShortcut }}</v-btn></div>
         <textarea
           v-bind:style="sourceFontStyle"
           class="hArea"
-          @keyup.ctrl.13="translate"
+          :placeholder="inputPlaceholder"
+          aria-label="原文，可直接输入或粘贴"
           @keyup.ctrl.71="google"
           @keyup.ctrl.66="baidu"
           @keyup.ctrl.80="command"
           @select="onSelect"
           @blur="deSelect"
           @click="deSelect"
-          @keydown="deSelect"
+          @keydown="deSelect($event); translateKeydown($event)"
           @mousemove="mouseMove"
-          v-model="sharedResult.text"
+          v-model="sourceText"
           @contextmenu="openMenu('contrastContext')"
         ></textarea>
       </div>
@@ -61,21 +63,23 @@
     <div v-else class="maxNoPad">
       <div
         :style="topStyle"
-        class="areaWarpper"
+        class="areaWarpper source-pane"
         @wheel="wheelHandler($event, 'source')"
         @keydown.ctrl.187="keyboardFontHandler($event, 'source')"
         @keydown.ctrl.189="keyboardFontHandler($event, 'source')"
-        @keyup.ctrl.13="translate"
         @contextmenu="openMenu('contrastContext')"
       >
+        <div class="source-toolbar"><span>原文</span><v-btn x-small text color="primary" :disabled="!sourceText.trim()" @click="translate">翻译 · {{ inputShortcut }}</v-btn></div>
         <textarea
           v-bind:style="sourceFontStyle"
-          @keyup.ctrl.13="translate"
+          @keydown="translateKeydown"
+          :placeholder="inputPlaceholder"
+          aria-label="原文，可直接输入或粘贴"
           @keyup.ctrl.71="google"
           @keyup.ctrl.66="baidu"
           @keyup.ctrl.80="command"
           class="vArea"
-          v-model="sharedResult.text"
+          v-model="sourceText"
         ></textarea>
       </div>
       <div
@@ -112,7 +116,7 @@
 
 <script lang="ts">
 import BaseView from "../components/BaseView.vue";
-import { Mixins, Component } from "vue-property-decorator";
+import { Mixins, Component, Watch } from "vue-property-decorator";
 import Focus from "./Focus.vue";
 import CoTextArea from "./CoTextArea.vue";
 import DiffTextArea from "./DiffTextArea.vue";
@@ -127,6 +131,14 @@ import DictResultPanel from "./DictResult.vue";
   },
 })
 export default class ContrastPanel extends Mixins(BaseView) {
+  sourceText = "";
+  private submittedText = "";
+
+  @Watch("sharedResult.text", { immediate: true })
+  syncSourceText(text: string) {
+    if (this.status === "Translating" && (!text || text === this.submittedText)) return;
+    this.sourceText = text || "";
+  }
   left: number = 0;
   top: number = 0;
   visible: boolean = false;
@@ -255,7 +267,9 @@ export default class ContrastPanel extends Mixins(BaseView) {
   }
 
   getModifiedText() {
-    return this.sharedResult.text;
+    if (this.layoutType === "focus") return undefined;
+    this.submittedText = this.sourceText;
+    return this.sourceText;
   }
 
   onSelect(event: Event) {
@@ -367,6 +381,10 @@ export default class ContrastPanel extends Mixins(BaseView) {
   padding: 0px;
   overflow: hidden;
 }
+.source-pane { display: flex; flex-direction: column; min-width: 0; }
+.source-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 10px; flex-shrink: 0; font-size: 12px; opacity: .85; border-bottom: 1px solid rgba(128, 128, 128, .16); }
+.source-pane textarea { flex: 1; min-height: 0; }
+.source-pane textarea::placeholder { font-size: 14px; opacity: .65; }
 .focusArea {
   overflow: auto;
 }

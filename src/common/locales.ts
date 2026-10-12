@@ -284,7 +284,7 @@ export const zh_cn = new Map<LocaleKey, string>([
   ["configSnapshot", "切换配置快照"],
   ["newConfigSnapshot", "拍摄配置快照"],
   ["delConfigSnapshot", "删除配置快照"],
-  ["<tooltip>translateInput", "在原文框Ctrl+Enter即可翻译，不需要点这个"],
+  ["<tooltip>translateInput", "输入原文后点击翻译，或按 Mac ⌘Enter / Windows Ctrl+Enter"],
   ["translator-compare", "多源对比引擎"],
   ["translator-cache", "快速缓存引擎"],
   ["focusSource", "专注模式原文"],

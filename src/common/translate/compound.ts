@@ -10,6 +10,7 @@ import {
 import { TranslatorType } from "@/common/types";
 import { AxiosRequestConfig } from "axios";
 import { autoReSegment, notEnglish } from "./helper";
+import { translationAborted } from "./chat-stream";
 import eventBus from "../event-bus";
 import config from "../configuration";
 import store from "@/store";
@@ -29,7 +30,7 @@ class ResultBufferManager {
   sync() {
     let resultBuffer: ResultBuffer = {};
     for (const engine of this.engines) {
-      if (this.has(engine)) {
+      if (this.resultBufferMap.has(engine)) {
         resultBuffer[engine] = this.get(engine) as SharedResult;
       } else {
         resultBuffer[engine] = emptySharedResult({ status: "Translating" });
@@ -52,7 +53,8 @@ class ResultBufferManager {
   }
 
   has(engine: TranslatorType | string) {
-    return this.resultBufferMap.has(engine);
+    const result = this.get(engine);
+    return !!result && result.status !== "Translating" && result.status !== "Fail";
   }
 
   set(engine: TranslatorType | string, result: SharedResult) {
@@ -65,6 +67,7 @@ class ResultBufferManager {
 }
 
 export class Compound {
+  private request?: AbortController;
   mainEngine: TranslatorType | string;
   config: AxiosRequestConfig;
   resultBuffer = new ResultBufferManager();
@@ -92,6 +95,7 @@ export class Compound {
   }
 
   onExit() {
+    this.cancel();
     this.engines = []; //关闭所有intercepter引擎
     return this.postSetEngines();
   }
@@ -126,8 +130,11 @@ export class Compound {
     text: string,
     from: Language,
     to: Language,
-    engines?: (TranslatorType | string)[]
+    engines?: (TranslatorType | string)[],
+    onProgress?: (result: SharedResult) => void
   ): Promise<SharedResult> {
+    this.cancel();
+    const request = this.request = new AbortController();
     if (!engines) {
       engines = [...this.engines];
     }
@@ -153,7 +160,7 @@ export class Compound {
       this.to = to;
     }
     //先清空缓存
-    const mainResult = this.translateWith(mainEngine, text, from, to);
+    const mainResult = this.translateWith(mainEngine, text, from, to, onProgress, request.signal);
     for (const name of supportEngines) {
       if (name === mainEngine) {
         continue;
@@ -166,8 +173,8 @@ export class Compound {
         console.log(name, "不支持", from, "to", to);
         continue;
       } else {
-        this.translateWith(name, text, from, to).catch((err: any) => {
-          console.log(name, "translate error", err);
+        this.translateWith(name, text, from, to, undefined, request.signal).catch((err: any) => {
+          if (!request.signal.aborted) console.log(name, "translate error", err);
         }); //这里catch一下就好了
       }
     }
@@ -178,14 +185,28 @@ export class Compound {
     engine: TranslatorType | string,
     text: string,
     from: Language,
-    to: Language
+    to: Language,
+    onProgress?: (result: SharedResult) => void,
+    signal?: AbortSignal
   ): Promise<SharedResult> {
     if (this.resultBuffer.has(engine)) {
       //如果已经有缓存了,直接返回就行了
       return Promise.resolve(this.resultBuffer.get(engine) as SharedResult);
     }
-    return getTranslator(engine)
-      .translate(text, from, to, this.config)
+    const translator = getTranslator(engine);
+    const progress = (translation: string) => {
+      if (signal?.aborted) return;
+      const result: SharedResult = {
+        text, translation, from, to, engine, status: "Translating",
+        textPara: text.split(/\n+/), transPara: translation.split(/\n+/), chineseStyle: notEnglish(to),
+      };
+      this.resultBuffer.set(engine, result);
+      onProgress?.(result);
+    };
+    const result = translator.translateStream
+      ? translator.translateStream(text, from, to, progress, signal)
+      : translator.translate(text, from, to, this.config);
+    return result
       .then((res: TranslateResult) => {
         res.engine = engine; //防止res.engine值不一样
         return res;
@@ -204,11 +225,17 @@ export class Compound {
         };
       })
       .then((res: SharedResult) => {
+        if (signal?.aborted) throw translationAborted();
         tracker.track("translation", String(engine));
         this.resultBuffer.set(engine, res);
         return res;
+      }).catch(error => {
+        if (!signal?.aborted) this.resultBuffer.set(engine, emptySharedResult({ text, engine, status: "Fail" }));
+        throw error;
       });
   }
+
+  cancel() { this.request?.abort(); }
 
   async detect(text: string) {
     // 优先使用离线检测，速度最快
@@ -221,7 +248,7 @@ export class Compound {
   }
 
   getBuffer(engine: TranslatorType | string) {
-    return this.resultBuffer.get(engine as TranslatorType);
+    return this.resultBuffer.has(engine) ? this.resultBuffer.get(engine as TranslatorType) : undefined;
   }
 
   setMainEngine(engineType: TranslatorType | string) {

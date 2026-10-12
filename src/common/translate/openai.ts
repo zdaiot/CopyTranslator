@@ -7,6 +7,8 @@ import {
 import { OpenAIConfig } from "./types";
 import * as http from "http";
 import * as https from "https";
+import axios from "axios";
+import { ChatStreamError, readChatStream, translationAborted } from "./chat-stream";
 
 // 默认提示词模板
 const DEFAULT_PROMPT = `You are a professional translator. Translate the following text to {to}. Only return the translated text without any explanation or additional information.
@@ -199,6 +201,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
       if (options.config.translatorName) {
         this.name = options.config.translatorName;
       }
+      this.config.stream = options.config.stream !== false;
     }
   }
 
@@ -227,7 +230,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
   private async callOpenAI(
     messages: OpenAIChatMessage[],
     config: OpenAIConfig
-  ): Promise<OpenAIChatResponse> {
+  ): Promise<string> {
     const apiUrl = config.apiBase.endsWith("/")
       ? `${config.apiBase}chat/completions`
       : `${config.apiBase}/chat/completions`;
@@ -237,7 +240,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
       messages: messages,
       temperature: config.temperature !== undefined ? config.temperature : 0.3,
       max_tokens: config.maxTokens !== undefined ? config.maxTokens : 2000,
-      stream: false,
+      stream: !!config.onProgress && config.stream !== false,
     };
 
     const url = new URL(apiUrl);
@@ -254,14 +257,21 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
         Authorization: `Bearer ${config.apiKey}`,
       },
       timeout: 60000, // 设置 60 秒超时，AI 模型响应较慢
+      maxRedirects: 0,
     };
 
     if (isLocal) {
       axiosConfig.httpAgent = new http.Agent();
-      axiosConfig.httpsAgent = new https.Agent({ rejectUnauthorized: false });
+      axiosConfig.httpsAgent = new https.Agent();
       axiosConfig.proxy = false;
     }
 
+    const cancellation = axios.CancelToken.source();
+    const cancel = () => cancellation.cancel("Translation cancelled");
+    axiosConfig.cancelToken = cancellation.token;
+    if (config.signal?.aborted) throw translationAborted();
+    config.signal?.addEventListener("abort", cancel, { once: true });
+    if (requestData.stream) axiosConfig.responseType = "stream";
     try {
       const response = await this.axios.post<OpenAIChatResponse>(
         apiUrl,
@@ -269,13 +279,24 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
         axiosConfig
       );
 
-      return response.data;
+      if (requestData.stream && typeof (response.data as any)?.[Symbol.asyncIterator] === "function") {
+        return await readChatStream(response.data as any, config.onProgress!, config.signal,
+          String(response.headers?.["content-type"]).includes("application/json"));
+      }
+      const content = response.data?.choices?.[0]?.message?.content;
+      if (typeof content !== "string" || !content.trim()) throw new TranslateError("API_SERVER_ERROR");
+      return content;
     } catch (error) {
+      if (config.signal?.aborted) throw translationAborted();
+      if (error instanceof ChatStreamError) throw error;
+      (error as any)?.response?.data?.destroy?.();
       if (error && typeof error === 'object' && 'response' in error) {
         console.error("AI 翻译 API 调用失败，HTTP 状态:", (error as any).response?.status);
         throw new TranslateError("API_SERVER_ERROR");
       }
       throw new TranslateError("NETWORK_ERROR");
+    } finally {
+      config.signal?.removeEventListener("abort", cancel);
     }
   }
 
@@ -306,18 +327,7 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
     ];
 
     try {
-      const response = await this.callOpenAI(messages, config);
-
-      if (
-        !response.choices ||
-        response.choices.length === 0 ||
-        !response.choices[0].message
-      ) {
-        console.error("OpenAI API 响应格式异常:", response);
-        throw new TranslateError("API_SERVER_ERROR");
-      }
-
-      const translatedText = response.choices[0].message.content.trim();
+      const translatedText = (await this.callOpenAI(messages, config)).trim();
       
       return {
         text: text,
@@ -335,6 +345,10 @@ export class OpenAI extends BaseTranslator<OpenAIConfig> {
     } catch (error) {
       throw error;
     }
+  }
+
+  translateStream(text: string, from: Language, to: Language, onProgress: (text: string) => void, signal?: AbortSignal) {
+    return this.translate(text, from, to, { ...this.config, onProgress, signal });
   }
 
   /**
