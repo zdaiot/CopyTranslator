@@ -88,7 +88,7 @@ async function run() {
   const state = {}, events = [], copies = [], pendingRequests = [];
   const store = {dispatch: (name, value) => {state[name] = plain(value);}};
   const types = load('src/common/translate/result-types.ts');
-  const helper = {notEnglish: language => language !== 'en', normalizeAppend: text => text, autoReSegment: result => ({...result, resultString: result.trans.paragraphs.join('\n')})};
+  const helper = {appendSourceText: load('src/common/translate/helper.ts').appendSourceText, notEnglish: language => language !== 'en', normalizeAppend: text => text, autoReSegment: result => ({...result, resultString: result.trans.paragraphs.join('\n')})};
   const engine = {
     getSupportLanguages: () => ['en', 'zh-CN'],
     translateStream: (text, from, to, progress, signal) => new Promise((resolve, reject) => pendingRequests.push({text, progress, signal, resolve: translation => resolve({text, from, to, engine: 'ai', origin: {paragraphs: [text]}, trans: {paragraphs: [translation]}}), reject})),
@@ -135,6 +135,10 @@ async function run() {
   const {TranslateController} = load('src/main/translate-controller.ts', dependencies);
   const settings = {autoCopy: true, enableNotify: true, 'translator-enabled': ['ai'], customTranslators: [], sourceLanguage: 'en', targetLanguage: 'zh-CN'};
   const controller = new TranslateController({get: key => settings[key], set() {}});
+  settings.incrementalCopy = true;
+  controller.text = ''; controller.setSrc('First paragraph.'); controller.setSrc('Second paragraph.');
+  assert.equal(controller.text, 'First paragraph. Second paragraph.', 'The main window retains its existing full-source accumulation rule');
+  controller.text = ''; settings.incrementalCopy = false; events.length = 0;
   const beforeEmpty = pendingRequests.length;
   await controller.translateWithOption({});
   assert.equal(pendingRequests.length, beforeEmpty, 'Selecting an AI engine with an empty input must not send a request');

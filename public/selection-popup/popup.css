@@ -11,3 +11,4 @@ button{cursor:pointer;border:0;background:transparent;color:var(--muted);border-
 @media(prefers-reduced-motion:reduce){.dots i{animation:none;opacity:.65}}
 
 #selection-button{display:grid;place-items:center;width:36px;height:36px;margin:2px;padding:4px;background:var(--surface);border:1px solid var(--border);border-radius:10px;box-shadow:0 1px 4px #0002}#selection-button:hover{border-color:var(--accent)}#selection-button img{width:27px;height:27px;object-fit:contain}.brand{object-fit:contain;background:transparent;padding:0}
+.source-actions{display:flex;align-items:center;gap:8px}.incremental-button{font-size:11px;line-height:1.6;padding:3px 7px;white-space:nowrap;border:1px solid var(--border)}.incremental-button[aria-pressed=true]{color:var(--accent);background:#2d91cf15;border-color:var(--accent)}.incremental-status{font-size:11px;color:var(--accent);line-height:1.5;margin-bottom:5px;letter-spacing:0}

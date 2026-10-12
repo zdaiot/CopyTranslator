@@ -86,7 +86,15 @@ function render(state) {
   updateEngineLabel();
   if (sourceText !== state.text) { byId('source').classList.remove('expanded'); byId('expand').textContent = '展开原文'; }
   sourceText = state.text;
-  byId('source').textContent = state.text;
+  byId('source').textContent = state.text || (state.status === 'idle' ? '已清空，请继续选中文字。' : '');
+  byId('copy-source').disabled = !state.text;
+  byId('incremental').setAttribute('aria-pressed', String(!!state.incremental));
+  byId('incremental').title = state.incremental ? '增量复制已开启；与主界面共用开关。关闭后，下次选区单独翻译。' : '与主界面共用开关：累积原文，每次全量重译';
+  byId('clear-accumulated').hidden = !state.incremental;
+  byId('clear-accumulated').disabled = !state.accumulatedCount;
+  byId('incremental-status').hidden = !state.incremental;
+  byId('incremental-status').textContent = `已累积 ${state.accumulatedCount || 0} 段 · 每次全量重译`;
+  byId('incremental-status').title = '关闭浮窗保留累积原文；点击“清空”或关闭增量复制后重新开始。';
   byId('result').textContent = state.translation;
   byId('error').textContent = state.error;
   byId('loading').hidden = state.status !== 'loading';

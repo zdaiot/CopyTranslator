@@ -11,7 +11,7 @@ function load(file, mocks) {
   vm.runInNewContext(code,{module,exports:module.exports,require:id=>mocks[id] || require(id),process,console,AbortController,setTimeout:(fn,ms)=>setTimeout(fn,ms===30000?100:ms),clearTimeout,global:{controller}},{filename:file});
   return module.exports;
 }
-let window, handlers = {}, requests = [];
+let window, handlers = {}, requests = [], copied = [];
 class FakeWindow extends EventEmitter {
   constructor(options) { super(); window=this; this.options=options; this.visible=false; this.bounds={x:0,y:0,width:450,height:360}; this.webContents=new EventEmitter(); this.webContents.send=(name,state)=>{this.state=JSON.parse(JSON.stringify(state));}; this.webContents.setWindowOpenHandler=()=>{}; }
   setAlwaysOnTop(){} setVisibleOnAllWorkspaces(_enabled, options){this.workspaces=options;} loadFile(){} isDestroyed(){return !!this.destroyed;}
@@ -23,11 +23,11 @@ const values={selectionPopup:true,translatorType:'mock','translator-enabled':['m
 const utils=load('src/main/selection-utils.ts',{});
 const {selectionPopup:popup}=load('src/main/selection-popup.ts',{
   electron:{app:{isPackaged:false},BrowserWindow:FakeWindow,ipcMain:{handle:(name,fn)=>{handlers[name]=fn;}},screen:{getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}},
-  '@/common/configuration':{__esModule:true,default:{get:key=>values[key]}},
+  '@/common/configuration':{__esModule:true,default:{get:key=>values[key],set:(key,value)=>{values[key]=value;popup.syncIncrementalMode(!!value);return true;}}},
   '@/common/translate/translators':{getTranslator:id=>({translate:text=>new Promise((resolve,reject)=>requests.push({id,text,resolve,reject})), ...(id === 'provider-model' ? {translateStream: (text, from, to, progress, signal) => new Promise((resolve,reject)=>requests.push({id,text,resolve,reject,progress,signal}))} : {})}),getEnabledWithCustomIds:()=>['mock', ...values.customTranslators],hasTranslator:id=>['mock', ...values.customTranslators].includes(id)},
   '@/common/translate/translator-name-resolver':{TranslatorNameResolver:{getDisplayName:id=>id,isCustomTranslator:id=>values.customTranslators.includes(id)}},
-  '@/common/translate/helper':{autoReSegment:value=>({resultString:value}),normalizeAppend:text=>text},
-  './clipboard':{clipboard:{writeText:()=>{}}},'./selection-utils':utils,
+  '@/common/translate/helper':{autoReSegment:value=>({resultString:value}),normalizeAppend:text=>text,appendSourceText:load('src/common/translate/helper.ts',{}).appendSourceText},
+  './clipboard':{clipboard:{writeText:text=>{copied.push(text);return Promise.resolve();}}},'./selection-utils':utils,
 });
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 (async()=>{
@@ -103,6 +103,64 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.deepEqual(settingsActions, [['settings', 'customTranslators']]); assert(!window.visible);
   assert(newest.signal.aborted, 'Closing a popup cancels a running stream');
   newest.resolve('ignored after close'); await wait(0); assert(!window.visible);
+  // Incremental selection shares the main switch, accumulates source, and
+  // always sends the full accumulated text. Hiding only dismisses the view.
+  const action = (name, value) => handlers['selection-popup:action']({sender: window.webContents}, name, value);
+  const finish = async (text, translation = 'translated ' + text) => {
+    popup.show(text, {x: 500, y: 500}); window.emit('ready-to-show'); await wait(150);
+    const request = requests.at(-1); request.resolve(translation); await wait(0); return request;
+  };
+  await finish('A', '译文 A');
+  const beforeToggle = requests.length;
+  await action('incremental');
+  assert.equal(values.incrementalCopy, true, 'The popup toggles the same persisted setting as the main window');
+  assert.equal(window.state.incremental, true); assert.equal(window.state.accumulatedCount, 1);
+  assert.equal(requests.length, beforeToggle, 'Enabling accumulation does not retranslate the current result');
+  popup.hide();
+  assert.equal((await finish('B', '译文 AB')).text, 'A B');
+  assert.equal(window.state.accumulatedCount, 2);
+  await action('copy-result'); assert.equal(copied.at(-1), '译文 AB');
+  await action('retry'); await wait(150);
+  assert.equal(requests.at(-1).text, 'A B'); requests.at(-1).resolve('retried AB'); await wait(0);
+  await action('engine', 'mock'); await wait(150);
+  assert.equal(requests.at(-1).text, 'A B'); requests.at(-1).resolve('other engine AB'); await wait(0);
+  assert.equal((await finish('B')).text, 'A B'); assert.equal(window.state.accumulatedCount, 2);
+  popup.hide(); await wait(120); assert(window.destroyed);
+  assert.equal((await finish('C')).text, 'A B C'); assert.equal(window.state.accumulatedCount, 3, 'Renderer cleanup must not erase a reading session');
+  values.selectionPopupTrigger = 'selectionButton';
+  const beforeOffer = requests.length;
+  popup.hide(); popup.offer('ignored offer', {x: 500, y: 500});
+  assert.equal(window.state.accumulatedCount, 3); popup.hide();
+  popup.offer('D', {x: 500, y: 500});
+  assert.equal(requests.length, beforeOffer, 'Unclicked offers do not collect or translate');
+  await action('translate'); await action('translate'); await wait(150);
+  assert.equal(requests.length, beforeOffer + 1); assert.equal(requests.at(-1).text, 'A B C D');
+  requests.at(-1).resolve('ABCD'); await wait(0); assert.equal(window.state.accumulatedCount, 4);
+  values.incrementalCopy = false; popup.syncIncrementalMode(false);
+  assert.equal(window.state.incremental, false); assert.equal(window.state.accumulatedCount, 0);
+  assert.equal((await finish('Fresh')).text, 'Fresh', 'Disabling the shared switch makes the next selection standalone');
+  values.incrementalCopy = true; popup.syncIncrementalMode(true);
+  const beforeLimit = requests.length;
+  popup.show('x'.repeat(20000), {x: 500, y: 500}); await wait(150);
+  assert.equal(requests.length, beforeLimit); assert.equal(window.state.status, 'error');
+  assert.equal(window.state.text, 'Fresh'); assert.equal(window.state.accumulatedCount, 1, 'Reject oversize additions without poisoning the accumulated source');
+  assert.equal((await finish('next')).text, 'Fresh next');
+  await action('engine', 'provider-model'); await wait(150);
+  const duringClear = requests.at(-1); duringClear.progress('unfinished accumulated output');
+  await action('clear-accumulated');
+  assert(duringClear.signal.aborted); assert.equal(window.state.status, 'idle');
+  assert.equal(window.state.accumulatedCount, 0); assert.equal(window.state.text, ''); assert.equal(window.state.translation, '');
+  duringClear.progress('obsolete'); duringClear.resolve('obsolete'); await wait(0);
+  assert.equal(window.state.translation, '', 'Clear cancels stale streaming updates');
+  assert.equal((await finish('Restart')).text, 'Restart'); assert.equal(window.state.accumulatedCount, 1);
+  await handlers['selection-popup:action']({sender: {}}, 'incremental');
+  await handlers['selection-popup:action']({sender: {}}, 'clear-accumulated');
+  assert.equal(values.incrementalCopy, true); assert.equal(window.state.accumulatedCount, 1);
+  popup.clearAccumulated(); popup.hide(); await wait(120);
+  popup.show('x'.repeat(20001), {x: 500, y: 500}); window.emit('ready-to-show');
+  assert(window.visible, 'Even an oversize first selection must visibly report its error');
+  assert.equal(window.state.status, 'error'); assert.equal(window.state.accumulatedCount, 0);
+  popup.hide();
   popup.stop();
-  console.log('PASS: popup IPC isolation, stale replies, pin/outside close, dismissed requests, translation errors, button gating/focus/resize, pinned button behavior, shortcut-only/direct/disabled modes, AI engine routing and setup IPC.');
+  console.log('PASS: popup IPC isolation, stale replies, pin/outside close, dismissed requests, translation errors, button gating/focus/resize, pinned button behavior, shortcut-only/direct/disabled modes, AI engine routing, setup IPC, shared incremental source mode, full retranslation, explicit collection, retry/dedup, clear/cancellation, limits and renderer recreation.');
 })().catch(error=>{popup.stop();console.error(error);process.exitCode=1;});

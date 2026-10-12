@@ -169,6 +169,11 @@ export function isChinese(src: string) {
   return reg.test(src); /*进行验证*/
 }
 
+// The main window and selection popup use the same source accumulation rule.
+export function appendSourceText(previous: string, next: string) {
+  return previous ? previous + (isChinese(next) ? "" : " ") + next : next;
+}
+
 export function normalizeAppend(src: string, purify = true) {
   if (!purify) return src.trim().replace(/\r/, "");
   src = src.replace(/\r\n/g, "\n");

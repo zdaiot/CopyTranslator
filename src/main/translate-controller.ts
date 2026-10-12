@@ -10,7 +10,7 @@ import { colorRules, getColorRule, KeyConfig, NetworkProxyConfig } from "../comm
 import {
   normalizeAppend,
   checkIsWord,
-  isChinese,
+  appendSourceText,
 } from "../common/translate/helper";
 import {
   Identifier,
@@ -240,16 +240,7 @@ class TranslateController {
     if (incremental) {
       eventBus.at("dispatch", "toast", "增量复制");
     }
-    if (incremental && this.text != "") {
-      //TODO 这里需要做特殊处理，中文不需要加空格
-      if (isChinese(append)) {
-        this.text = this.text + append;
-      } else {
-        this.text = this.text + " " + append;
-      }
-    } else {
-      this.text = append;
-    }
+    this.text = incremental ? appendSourceText(this.text, append) : append;
     if (this.incrementCounter > 0) {
       this.handle("incrementCounter", this.incrementCounter - 1);
     }

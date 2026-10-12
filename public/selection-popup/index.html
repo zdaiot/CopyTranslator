@@ -21,7 +21,15 @@
     </header>
     <div id="engine-menu" class="engine-menu" role="menu" aria-label="翻译引擎" hidden></div>
     <section class="card source-card">
-      <div class="section-heading"><span>原文</span><button class="icon small" data-action="copy-source" title="复制原文" aria-label="复制原文"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg></button></div>
+      <div class="section-heading">
+        <span>原文</span>
+        <div class="source-actions">
+          <button id="incremental" class="incremental-button" data-action="incremental" aria-pressed="false" title="与主界面共用开关：累积原文，每次全量重译">增量复制</button>
+          <button id="clear-accumulated" class="text-button" data-action="clear-accumulated" title="清空浮窗累积的原文，开始新的翻译" hidden>清空</button>
+          <button id="copy-source" class="icon small" data-action="copy-source" title="复制原文" aria-label="复制原文"><svg viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V4H4v12h4"/></svg></button>
+        </div>
+      </div>
+      <div id="incremental-status" class="incremental-status" hidden></div>
       <div id="source" class="text source"></div>
       <button id="expand" class="text-button" hidden>展开原文</button>
     </section>

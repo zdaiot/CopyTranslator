@@ -102,6 +102,18 @@ const key = (target, value) => target.dispatchEvent(new window.KeyboardEvent('ke
   key(document.activeElement, 'End'); key(document.activeElement, 'ArrowUp'); key(document.activeElement, 'Enter');
   assert.deepEqual(calls.pop(), ['engine', 'ai-49']);
   assert.equal(calls.length, 0);
+  update({...initial, incremental: true, accumulatedCount: 2, text: 'A B'});
+  assert.equal(get('incremental').getAttribute('aria-pressed'), 'true');
+  assert.equal(get('incremental-status').textContent, '已累积 2 段 · 每次全量重译');
+  assert(!get('clear-accumulated').hidden); assert(!get('clear-accumulated').disabled);
+  get('incremental').click(); assert.deepEqual(calls.pop(), ['incremental']);
+  get('clear-accumulated').click(); assert.deepEqual(calls.pop(), ['clear-accumulated']);
+  update({...initial, incremental: true, accumulatedCount: 0, status: 'idle', text: '', translation: ''});
+  assert(get('clear-accumulated').disabled); assert(get('copy-source').disabled); assert(get('copy-result').disabled);
+  assert(get('loading').hidden); assert(get('source').textContent.includes('已清空'));
+  update({...initial, incremental: false, accumulatedCount: 0});
+  assert.equal(get('incremental').getAttribute('aria-pressed'), 'false');
+  assert(get('clear-accumulated').hidden); assert(get('incremental-status').hidden);
   dom.window.close();
   console.log('PASS: shipped popup menu open/close, builtin and AI switching, no duplicate requests, safe labels, keyboard navigation, AI setup, async updates, reopening and long lists.');
 })().catch(error => { dom.window.close(); console.error(error); process.exitCode = 1; });

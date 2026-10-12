@@ -259,6 +259,8 @@ class Controller extends MainController {
   }
 
   postSet(identifier: Identifier, value: any): boolean {
+    if (identifier === "incrementalCopy") selectionPopup.syncIncrementalMode(!!value);
+    if (identifier === "selectionPopup" && !value) selectionPopup.clearAccumulated();
     if (["selectionPopup", "selectionPopupTrigger", "dragCopy", "enableDoubleCopyTranslate", "dragCopyMode"].includes(identifier)) eventListener.refresh();
     switch (identifier) {
       case "layoutType":
