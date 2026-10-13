@@ -193,7 +193,7 @@ export const zh_cn = new Map<LocaleKey, string>([
   ["layoutButton", "点击切换不同界面布局，右键单次增量复制"],
   ["<tooltip>autoCopy", "翻译后自动复制翻译结果到剪贴板"],
   ["<tooltip>listenClipboard", "监听并翻译剪贴板内容"],
-  ["<tooltip>dragCopy", "拖拽后模拟复制选中内容"],
+  ["<tooltip>dragCopy", "拖选后复制文字；无需开启监听剪贴板，不改变浮窗触发方式"],
   ["<tooltip>doubleClickCopy", "双击复制选中内容"],
   ["<tooltip>incrementalCopy", "将新复制的内容附加到之前的原文后"],
   ["<tooltip>stayTop", "界面始终保持在最上层"],
@@ -271,7 +271,7 @@ export const zh_cn = new Map<LocaleKey, string>([
   ],
   [
     "dragCopyTip",
-    "在打开拖拽复制选项后，只需按住鼠标并拖拽选中文字，即可复制文字。\n强烈建议您启用拖拽复制的白名单模式（设置->拖拽复制），这样在特定程序才会触发拖拽复制",
+    "开启后，拖选文字并松开鼠标，即可复制到剪贴板。开启“监听剪贴板”后，主界面才会自动翻译；全局划词浮窗仍按自己的触发方式显示。Mac 需要辅助功能权限。\n可使用白名单模式，让拖拽复制只在指定应用生效。",
   ],
   ["actionButtons", "动作按钮"],
   ["addNewActionButton", "添加新的动作按钮"],
@@ -871,7 +871,7 @@ export const en = new Map<LocaleKey, string>([
     "dragCopyPrompt",
     "If the program you want is not listed here, please try dragging and dropping on that program and try again",
   ],
-  ["<tooltip>dragCopy", "Drag and drop to copy the selected content"],
+  ["<tooltip>dragCopy", "Drag to select and copy text. Works without clipboard monitoring and preserves the popup trigger."],
   [
     "<tooltip>dragCopyMode",
     "It is recommended to use the whitelist mode, and only respond to drag and drop copying in specific applications",
@@ -882,7 +882,7 @@ export const en = new Map<LocaleKey, string>([
   ],
   [
     "dragCopyTip",
-    "After the drag copy option is turned on, just press and hold the mouse and drag the selected text to copy the text.\nIt is strongly recommended that you enable the white list mode of drag replication (Settings ->DragCopy), so that drag replication will be triggered in specific programs.",
+    "Select text by dragging and release the mouse to copy it. Enable clipboard monitoring to translate it in the main window. The selection popup keeps its own trigger mode. macOS requires Accessibility permission.\nUse the whitelist to limit Drag Copy to specific applications.",
   ],
   ["cacheGroup", "Cache Group"],
   ["cacheGroupDesc", "Configure cached translators and their order"],

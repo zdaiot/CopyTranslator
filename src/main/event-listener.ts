@@ -1,5 +1,4 @@
 import { BrowserWindow, screen, systemPreferences } from "electron";
-import simulate from "./simulate";
 import { clipboard } from "./clipboard";
 import eventBus from "../common/event-bus";
 import config from "../common/configuration";
@@ -16,7 +15,7 @@ class EventListener {
   private revision = new SelectionRevision();
   private lastCopy = 0;
   private copying = false;
-  private queued?: { point: Point; application?: { pid: number; name: string; handle?: number }; revision: number; explicit: boolean };
+  private queued?: { point: Point; application?: { pid: number; name: string; handle?: number }; revision: number; explicit: boolean; doubleClick: boolean };
   private down?: { point: Point; time: number };
   private permission?: boolean;
   private lastCapture = "none";
@@ -34,7 +33,7 @@ class EventListener {
         }
       });
       macIntegration.on("pointerdown", (point) => this.pointerDown(point));
-      macIntegration.on("selection-gesture", (event) => { if (!event.doubleClick || config.get("selectionPopup") || config.get("doubleClickCopy")) void this.gesture(event, event.application); });
+      macIntegration.on("selection-gesture", (event) => { void this.gesture(event, event.application, false, !!event.doubleClick); });
       macIntegration.on("escape", () => this.dismiss());
       macIntegration.on("double-copy", () => this.doubleCopy());
     } else {
@@ -51,7 +50,7 @@ class EventListener {
           const point = this.point(event);
           const dragged = this.down && Date.now() - this.down.time >= 100 && Math.hypot(point.x - this.down.point.x, point.y - this.down.point.y) >= 8;
           this.down = undefined;
-          if (dragged || event.clicks >= 2 && (config.get("selectionPopup") || config.get("doubleClickCopy"))) void this.gesture(point);
+          if (dragged || event.clicks >= 2) void this.gesture(point, undefined, false, !dragged);
         });
         this.hook!.on("keydown", (event) => {
           if (event.keycode === 1) this.dismiss();
@@ -82,21 +81,18 @@ class EventListener {
     if (!config.get("selectionPopup")) return;
     await this.gesture(screen.getCursorScreenPoint(), undefined, true);
   }
-  private async gesture(point: Point, application?: { pid: number; name: string; handle?: number }, explicit = false) {
-    if ((!config.get("selectionPopup") && !config.get("dragCopy")) || (!explicit && this.ownWindow(point))) return;
-    if (!explicit && config.get("selectionPopup") && config.get("selectionPopupTrigger") === "selectionShortcut") return;
+  private async gesture(point: Point, application?: { pid: number; name: string; handle?: number }, explicit = false, doubleClick = false) {
+    const copySelection = !explicit && !!config.get("dragCopy") && (!doubleClick || !!config.get("doubleClickCopy"));
+    const offerPopup = !!config.get("selectionPopup") && (explicit || config.get("selectionPopupTrigger") !== "selectionShortcut");
+    if ((!copySelection && !offerPopup) || (!explicit && this.ownWindow(point))) return;
     const revision = this.revision.next();
-    if (this.copying) { this.queued = { point, application, revision, explicit }; return; }
+    if (this.copying) { this.queued = { point, application, revision, explicit, doubleClick }; return; }
     let ownsCapture = false;
     try {
       await new Promise((resolve) => setTimeout(resolve, 80));
       if (!this.revision.current(revision)) return;
       application = application || await foregroundApplication();
       if (application.pid === process.pid || !application.pid || !await isValidWindow("dragCopy", application) || !this.revision.current(revision)) return;
-      if (!config.get("selectionPopup")) {
-        if (config.get("listenClipboard")) await simulate.copy();
-        return;
-      }
       this.copying = true;
       ownsCapture = true;
       const text = await clipboard.withPaused(async () => {
@@ -109,7 +105,11 @@ class EventListener {
         }
         return clipboard.readText("selection");
       });
-      if (this.revision.current(revision) && config.get("selectionPopup") && typeof text === "string" && text.trim()) {
+      if (!this.revision.current(revision) || typeof text !== "string" || !text.trim()) return;
+      // Both features share one capture. Drag Copy keeps the selected text in
+      // the clipboard; the popup alone still restores the previous clipboard.
+      if (copySelection && config.get("dragCopy") && (!doubleClick || config.get("doubleClickCopy"))) await clipboard.copySelection(text);
+      if (this.revision.current(revision) && offerPopup && config.get("selectionPopup")) {
         if (explicit) selectionPopup.show(text, point);
         else selectionPopup.offer(text, point);
       }
@@ -119,7 +119,7 @@ class EventListener {
         this.copying = false;
         const queued = this.queued;
         this.queued = undefined;
-        if (queued && this.revision.current(queued.revision)) void this.gesture(queued.point, queued.application, queued.explicit);
+        if (queued && this.revision.current(queued.revision)) void this.gesture(queued.point, queued.application, queued.explicit, queued.doubleClick);
       }
     }
   }

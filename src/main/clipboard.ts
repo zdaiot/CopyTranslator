@@ -67,6 +67,13 @@ class ClipboardWatcher {
   static async writeText(text: string) {
     return this.withPaused(async () => { await nativeClipboard.writeText(text); });
   }
+  static async copySelection(text: string) {
+    // Internal writes (for example copying a translation) stay silent. A drag
+    // copy is user input and should reach the clipboard listener exactly once.
+    const changed = text !== this.previousText;
+    await this.writeText(text);
+    if (changed && this.watching && !this.paused) this.events.emit("text-changed");
+  }
   static async startWatching() {
     this.init();
     if (this.watching) return;

@@ -21,7 +21,7 @@
     "typecheck": "tsc --noEmit --skipLibCheck",
     "build:mac": "node scripts/build-mac.js",
     "build:win": "node scripts/build-windows.js",
-    "test:selection": "node scripts/test-selection.js && node scripts/test-popup.js && node scripts/test-popup-menu.js && node scripts/test-selection-trigger.js && node scripts/test-baidu.js && node scripts/test-selection-shortcut.js",
+    "test:selection": "node scripts/test-selection.js && node scripts/test-popup.js && node scripts/test-popup-menu.js && node scripts/test-selection-trigger.js && node scripts/test-drag-copy.js && node scripts/test-baidu.js && node scripts/test-selection-shortcut.js",
     "test:ai": "node scripts/test-ai-providers.js && node scripts/test-provider-setup.js && node scripts/test-streaming.js && node scripts/test-ai-settings.js"
   },
   "main": "background.js",
