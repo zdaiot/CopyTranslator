@@ -140,12 +140,13 @@ module.exports = {
           // linker signatures makes TCC attribute helper access to an unsigned
           // executable path instead of the authorized application bundle.
           identity: process.env.CSC_NAME || "-",
-          binaries: ["Contents/Resources/native/selection-helper"],
+          binaries: ["Contents/Resources/native/selection-helper", "Contents/Resources/native/popup-space.node"],
           target: [{ target: "dmg", arch: [process.env.BUILD_ARCH || process.arch] }],
           icon: "icon-mac.png",
           minimumSystemVersion: "13.0",
           extraResources: [
             { from: `build/native/${process.env.BUILD_ARCH || process.arch}/selection-helper`, to: "native/selection-helper" },
+            { from: `build/native/${process.env.BUILD_ARCH || process.arch}/popup-space.node`, to: "native/popup-space.node" },
             { from: "icon-mac.png", to: "icon-mac.png" },
           ],
           extendInfo: { NSAppleEventsUsageDescription: "CopyTranslator uses accessibility to read selected text for translation." },

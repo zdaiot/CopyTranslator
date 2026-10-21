@@ -51,6 +51,19 @@ export class RendererController extends RenController {
 
   initApp() {
     this.app = createApp();
+    // Auto mode must also follow a system appearance change while the app is
+    // running (including windows left hidden overnight).
+    const app = this.app;
+    const appearance = window.matchMedia("(prefers-color-scheme:dark)");
+    const syncAppearance = () => { app.$vuetify.theme.dark = isDarkMode(); };
+    appearance.addEventListener("change", syncAppearance);
+    window.addEventListener("focus", syncAppearance);
+    document.addEventListener("visibilitychange", syncAppearance);
+    app.$once("hook:beforeDestroy", () => {
+      appearance.removeEventListener("change", syncAppearance);
+      window.removeEventListener("focus", syncAppearance);
+      document.removeEventListener("visibilitychange", syncAppearance);
+    });
   }
 
   notify(text: string) {

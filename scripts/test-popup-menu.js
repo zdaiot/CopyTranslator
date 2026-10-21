@@ -114,6 +114,71 @@ const key = (target, value) => target.dispatchEvent(new window.KeyboardEvent('ke
   update({...initial, incremental: false, accumulatedCount: 0});
   assert.equal(get('incremental').getAttribute('aria-pressed'), 'false');
   assert(get('clear-accumulated').hidden); assert(get('incremental-status').hidden);
+  const chat = {engine:'chat-model', engines:[{id:'chat-model',name:'阅读模型',ai:true}], messages:[], status:'idle', error:''};
+  get('chat-tab').click(); assert.deepEqual(calls.pop(), ['pane', 'chat']);
+  update({...initial, pane:'chat', chat, pinned:true});
+  assert.equal(get('chat-tab').getAttribute('aria-selected'), 'true');
+  assert(get('translation-panel').hidden); assert(!get('chat-panel').hidden);
+  assert.equal(get('source-label').textContent, '已附上原文');
+  assert.equal(get('engine-name').textContent, '阅读模型');
+  assert.equal(document.activeElement, get('chat-input'));
+  get('engine').click(); assert.equal(menu.querySelectorAll('[data-engine-id]').length, 1, 'Chat only lists enabled AI models');
+  get('engine').click();
+  const input = get('chat-input');
+  input.value = '解释一下'; input.dispatchEvent(new window.Event('input'));
+  assert(!get('chat-send').disabled);
+  input.dispatchEvent(new window.Event('compositionstart')); key(input, 'Enter'); assert.equal(calls.length, 0, 'IME selection must not send');
+  input.dispatchEvent(new window.Event('compositionend'));
+  key(input, 'Enter'); assert.deepEqual(calls.pop(), ['chat-send', '解释一下']); assert.equal(input.value, '');
+  update({...initial, pane:'chat', chat:{...chat,status:'loading',messages:[{role:'user',content:'问题',status:'done'},{role:'assistant',content:'<script>unsafe</script>',status:'loading'}]}});
+  assert(get('chat-send').disabled); assert(!get('chat-stop').hidden);
+  assert.equal(get('chat-messages').querySelector('script'), null, 'Conversation is text, never HTML');
+  assert(get('chat-messages').textContent.includes('<script>unsafe</script>'));
+  get('chat-stop').click(); assert.deepEqual(calls.pop(), ['chat-stop']);
+  update({...initial, pane:'chat', chat:{...chat,status:'error',error:'Controlled failure',messages:[{role:'user',content:'问题',status:'done'},{role:'assistant',content:'partial',status:'error'}]}});
+  assert(!get('chat-error').hidden); assert(!get('chat-retry').hidden);
+  get('chat-retry').click(); assert.deepEqual(calls.pop(), ['chat-retry']);
+  get('chat-clear').click(); assert.deepEqual(calls.pop(), ['chat-clear']);
+  update({...initial, pane:'chat', chat:{...chat,engine:'',engines:[]}});
+  assert(!get('chat-unavailable').hidden); assert(input.disabled);
+  update({...initial, pane:'translation'});
+  assert(!get('translation-panel').hidden); assert(get('chat-panel').hidden);
+  // Simulate pointer capture in an isolated DOM, without desktop input.
+  const handle = get('drag-handle');
+  handle.setPointerCapture = () => {}; handle.hasPointerCapture = () => true; handle.releasePointerCapture = () => {};
+  const pointer = (type, x, y) => {
+    const event = new window.MouseEvent(type, {button:0,buttons:type==='pointerup'?0:1,screenX:x,screenY:y,bubbles:true,cancelable:true});
+    Object.defineProperty(event,'pointerId',{value:1}); handle.dispatchEvent(event);
+  };
+  pointer('pointerdown',100,100); pointer('pointermove',180,160); pointer('pointerup',180,160);
+  assert.deepEqual(JSON.parse(JSON.stringify(calls.splice(0))), [['drag-start',{x:100,y:100}],['drag-move',{x:180,y:160}],['drag-end']]);
+  pointer('pointermove',200,200); assert.equal(calls.length,0,'Movement stops when released');
+  for (const preset of ['small','medium','large']) {
+    document.querySelector(`[data-size="${preset}"]`).click();
+    assert.deepEqual(calls.pop(), ['size-preset', preset]);
+    update({...initial,sizePreset:preset});
+    assert.equal(document.querySelectorAll('.size-presets [aria-pressed="true"]').length,1);
+    assert.equal(document.querySelector('.size-presets [aria-pressed="true"]').dataset.size,preset);
+  }
+  update({...initial,sizePreset:'custom'});
+  assert.equal(document.querySelectorAll('.size-presets [aria-pressed="true"]').length,0,'Manual sizes do not claim to match a preset');
+  const handles=[...document.querySelectorAll('[data-resize]')];
+  assert.equal(handles.length,8);
+  for (const handle of handles) {
+    handle.setPointerCapture=()=>{}; handle.hasPointerCapture=()=>true; handle.releasePointerCapture=()=>{};
+    for (const [type,x,y] of [['pointerdown',100,100],['pointermove',140,130],['pointercancel',140,130],['pointermove',200,200]]) {
+      const event=new window.MouseEvent(type,{button:0,buttons:type==='pointercancel'?0:1,screenX:x,screenY:y,bubbles:true,cancelable:true});
+      Object.defineProperty(event,'pointerId',{value:5});
+      // A non-activating panel may deliver moves to adjacent content before
+      // pointer capture takes effect; all eight handles must keep resizing.
+      (type==='pointermove'?get('source'):handle).dispatchEvent(event);
+    }
+    assert.deepEqual(JSON.parse(JSON.stringify(calls.splice(0))),[['resize-start',{x:100,y:100,edge:handle.dataset.resize}],['resize-move',{x:140,y:130}],['resize-end']]);
+  }
+  update({...initial,pinned:true});
+  assert.equal(get('pin').getAttribute('aria-label'),'取消固定浮窗');
+  assert(get('hint').textContent.includes('下次翻译新开窗口'));
+  update({...initial,pinned:false}); assert(get('hint').textContent.includes('留在当前桌面'));
   dom.window.close();
   console.log('PASS: shipped popup menu open/close, builtin and AI switching, no duplicate requests, safe labels, keyboard navigation, AI setup, async updates, reopening and long lists.');
 })().catch(error => { dom.window.close(); console.error(error); process.exitCode = 1; });

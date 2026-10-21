@@ -7,4 +7,7 @@ if (!['arm64', 'x64'].includes(arch)) throw new Error(`Unsupported architecture:
 const output = path.resolve('build/native', arch);
 fs.mkdirSync(output, {recursive: true});
 const result = spawnSync('xcrun', ['swiftc', '-O', '-target', `${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos13.0`, '-module-cache-path', path.resolve('node_modules/.cache/swift'), 'native/macos/SelectionHelper.swift', '-o', path.join(output, 'selection-helper')], {stdio: 'inherit'});
-process.exit(result.status ?? 1);
+if (result.status !== 0) process.exit(result.status ?? 1);
+const headers = require('node-api-headers').include_dir;
+const panel = spawnSync('xcrun', ['clang++', '-std=c++17', '-O2', '-fobjc-arc', '-shared', '-undefined', 'dynamic_lookup', '-framework', 'AppKit', '-target', `${arch === 'x64' ? 'x86_64' : 'arm64'}-apple-macos13.0`, '-DNAPI_VERSION=8', '-I', headers, 'native/macos/PopupSpace.mm', '-o', path.join(output, 'popup-space.node')], {stdio: 'inherit'});
+process.exit(panel.status ?? 1);

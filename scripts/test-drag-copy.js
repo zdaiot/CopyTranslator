@@ -50,7 +50,7 @@ function harness(platform = 'darwin') {
       isValidWindow: async () => state.allowed },
     './mac-integration': { macIntegration: helper },
     './windows-integration': { windowsIntegration: { request: helper.request, stop() {} } },
-    './selection-popup': { selectionPopup: { init() {}, hide() {}, pointerDown() {},
+    './selection-popup': { selectionPopup: { init() {}, hide() {}, dismiss() {}, pointerDown() {},
       contains: () => state.ownWindow, show: text => state.shows.push(text), offer: text => state.offers.push(text) } },
     './selection-utils': load('src/main/selection-utils.ts'),
   });

@@ -148,6 +148,8 @@ export class CustomTranslatorManager {
         maxTokens: config.maxTokens,
         prompt: config.prompt,
         stream: config.stream,
+        chatEnabled: config.chatEnabled,
+        chatPrompt: config.chatPrompt,
         providerType: provider.providerType,
         reasoningProtocol: config.reasoningProtocol,
         reasoningEffort: config.reasoningEffort,

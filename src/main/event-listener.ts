@@ -35,6 +35,11 @@ class EventListener {
       macIntegration.on("pointerdown", (point) => this.pointerDown(point));
       macIntegration.on("selection-gesture", (event) => { void this.gesture(event, event.application, false, !!event.doubleClick); });
       macIntegration.on("escape", () => this.dismiss());
+      macIntegration.on("space-changed", () => {
+        this.revision.next();
+        this.queued = undefined;
+        selectionPopup.workspaceChanged();
+      });
       macIntegration.on("double-copy", () => this.doubleCopy());
     } else {
       try {
@@ -73,7 +78,7 @@ class EventListener {
     return selectionPopup.contains(point) || !!focused && focused.isVisible() && isPointInside(point, focused.getBounds());
   }
   private pointerDown(point: Point) { this.revision.next(); selectionPopup.pointerDown(point); }
-  private dismiss() { this.revision.next(); selectionPopup.hide(); }
+  private dismiss() { this.revision.next(); selectionPopup.dismiss(); }
   private doubleCopy() {
     if (config.get("enableDoubleCopyTranslate")) setTimeout(() => eventBus.at("dispatch", "doubleCopyTranslate"), 100);
   }

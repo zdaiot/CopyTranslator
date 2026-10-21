@@ -24,6 +24,21 @@ const small = placeSelectionPopup({x:0,y:0},{width:450,height:360},{x:0,y:0,widt
 assert(small.width < 320 && small.height < 240);
 const revision = new SelectionRevision();
 const old = revision.next(); assert(revision.current(old)); revision.next(); assert(!revision.current(old));
+const original = {x:-1500,y:100,width:450,height:360};
+for (const edge of utils.popupResizeEdges) {
+  for (const delta of [{x:5000,y:5000},{x:-5000,y:-5000},{x:25,y:35}]) {
+    const resized = utils.resizeSelectionPopup(original, edge, delta, area, {width:340,height:260});
+    assert(resized.width>=340 && resized.width<=900); assert(resized.height>=260 && resized.height<=900);
+    assert(resized.x>=area.x && resized.x+resized.width<=area.x+area.width);
+    assert(resized.y>=area.y && resized.y+resized.height<=area.y+area.height);
+    if (edge.includes('w')) assert.equal(resized.x+resized.width,original.x+original.width);
+    else assert.equal(resized.x,original.x);
+    if (edge.includes('n')) assert.equal(resized.y+resized.height,original.y+original.height);
+    else assert.equal(resized.y,original.y);
+    if (edge==='n'||edge==='s') assert.equal(resized.width,original.width);
+    if (edge==='e'||edge==='w') assert.equal(resized.height,original.height);
+  }
+}
 
 (async () => {
   // Verify that unchanged text never triggers image decoding when OCR is off,

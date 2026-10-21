@@ -7,7 +7,7 @@ function load(file,mocks={}) {
   return module.exports;
 }
 const helper=new EventEmitter(); helper.configure=()=>{};
-let captures=0, allowed=true, nextCapture, offers=[], shows=[];
+let captures=0, allowed=true, nextCapture, offers=[], shows=[], spaceChanges=0;
 helper.request=async command=>{assert.equal(command,'capture');captures++;return nextCapture ? nextCapture : {text:'current selection'};};
 const values={selectionPopup:true,selectionPopupTrigger:'selectionShortcut'};
 const utils=load('src/main/selection-utils.ts');
@@ -17,7 +17,7 @@ const {eventListener:listener}=load('src/main/event-listener.ts',{
   '../common/event-bus':{__esModule:true,default:{}},'../common/configuration':{__esModule:true,default:{get:key=>values[key]}},
   './focus-handler':{foregroundApplication:async()=>({pid:200,name:'Fixture'}),isValidWindow:async()=>allowed},
   './mac-integration':{macIntegration:helper},'./windows-integration':{windowsIntegration:{stop(){}}},
-  './selection-popup':{selectionPopup:{init(){},hide(){},contains:()=>false,pointerDown(){},show:text=>shows.push(text),offer:text=>offers.push(text)}},
+  './selection-popup':{selectionPopup:{init(){},hide(){},dismiss(){},workspaceChanged(){spaceChanges++;},contains:()=>false,pointerDown(){},show:text=>shows.push(text),offer:text=>offers.push(text)}},
   './selection-utils':utils,
 });
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -34,5 +34,9 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.equal(shows.length,1,'Changing modes or disabling selection invalidates pending capture');
   nextCapture=null; helper.emit('selection-gesture',{x:10,y:20}); helper.emit('pointerdown',{x:100,y:100}); await wait(110);
   assert.equal(offers.length,1,'A new click invalidates the pending gesture');
+  nextCapture=new Promise(r=>resolve=r);
+  const switching=listener.translateSelection(); await wait(110);
+  helper.emit('space-changed'); resolve({text:'old desktop'}); await switching;
+  assert.equal(spaceChanges,1); assert.equal(shows.length,1,'A Space change invalidates capture before it can open a stale popup');
   listener.stop(); console.log('PASS: shortcut-only capture gating, explicit fresh capture, application lists, master switch and capture cancellation.');
 })().catch(error=>{listener.stop();console.error(error);process.exitCode=1;});

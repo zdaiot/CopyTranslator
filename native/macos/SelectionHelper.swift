@@ -27,6 +27,14 @@ final class SelectionHelper {
         // Re-check when returning from System Settings or unlocking the Mac.
         // No permission polling is needed while the machine is idle.
         let center = NSWorkspace.shared.notificationCenter
+        // A non-activating panel may never blur when a three-finger swipe
+        // changes Spaces. Observe the workspace itself, without polling.
+        workspaceObservers.append(center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
+            guard let self = self else { return }
+            self.generation += 1
+            self.downPoint = nil
+            self.emit(["event": "space-changed"])
+        })
         for name in [NSWorkspace.didActivateApplicationNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
             workspaceObservers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
                 guard let self = self, self.watchSelection || self.doubleCopy else { return }
@@ -114,6 +122,15 @@ final class SelectionHelper {
     }
 
     func handle(_ event: NSEvent) {
+        // Mission Control / the Dock owns these clicks and Escape presses.
+        // They navigate windows; they must not dismiss a result or capture text.
+        if let target = event.cgEvent?.getIntegerValueField(.eventTargetUnixProcessID),
+           target > 0, target <= Int64(Int32.max),
+           NSRunningApplication(processIdentifier: pid_t(target))?.bundleIdentifier == "com.apple.dock" {
+            generation += 1
+            downPoint = nil
+            return
+        }
         let location = point(event)
         let app = application()
         switch event.type {

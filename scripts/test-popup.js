@@ -8,26 +8,33 @@ const controller = {handle: (...args) => settingsActions.push(args)};
 function load(file, mocks) {
   const code = ts.transpileModule(fs.readFileSync(file, 'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2019}}).outputText;
   const module = {exports:{}};
-  vm.runInNewContext(code,{module,exports:module.exports,require:id=>mocks[id] || require(id),process,console,AbortController,setTimeout:(fn,ms)=>setTimeout(fn,ms===30000?100:ms),clearTimeout,global:{controller}},{filename:file});
+  vm.runInNewContext(code,{module,exports:module.exports,require:id=>mocks[id] || require(id),process,console,Error,AbortController,setTimeout:(fn,ms)=>setTimeout(fn,ms===30000?100:ms),clearTimeout,global:{controller}},{filename:file});
   return module.exports;
 }
-let window, handlers = {}, requests = [], copied = [];
+let currentSpace = 1, focusedWindow;
+const windows = [];
+let window, handlers = {}, requests = [], copied = [], chatRequests = [];
 class FakeWindow extends EventEmitter {
-  constructor(options) { super(); window=this; this.options=options; this.visible=false; this.bounds={x:0,y:0,width:450,height:360}; this.webContents=new EventEmitter(); this.webContents.send=(name,state)=>{this.state=JSON.parse(JSON.stringify(state));}; this.webContents.setWindowOpenHandler=()=>{}; }
+  static getFocusedWindow() { return focusedWindow; }
+  constructor(options) { super(); window=this; windows.push(this); this.space=currentSpace; this.options=options; this.visible=false; this.bounds={x:0,y:0,width:450,height:360}; this.webContents=new EventEmitter(); this.webContents.send=(name,state)=>{this.state=JSON.parse(JSON.stringify(state));}; this.webContents.setWindowOpenHandler=()=>{}; }
+  setOpacity(value){this.opacity=value;}
   setAlwaysOnTop(){} setVisibleOnAllWorkspaces(_enabled, options){this.workspaces=options;} loadFile(){} isDestroyed(){return !!this.destroyed;}
   setMinimumSize(){} setResizable(value){this.resizable=value;} setFocusable(value){this.focusable=value;}
-  showInactive(){this.visible=true;} hide(){this.visible=false;} destroy(){this.destroyed=true;this.emit('closed');}
+  showInactive(){window=this;this.visible=true;} hide(){this.visible=false;} destroy(){this.destroyed=true;this.emit('closed');}
   isVisible(){return this.visible;} getBounds(){return this.bounds;} setBounds(bounds){this.bounds=bounds;}
 }
 const values={selectionPopup:true,translatorType:'mock','translator-enabled':['mock'],customTranslators:[],sourceLanguage:'en',targetLanguage:'zh-CN'};
 const utils=load('src/main/selection-utils.ts',{});
 const {selectionPopup:popup}=load('src/main/selection-popup.ts',{
-  electron:{app:{isPackaged:false},BrowserWindow:FakeWindow,ipcMain:{handle:(name,fn)=>{handlers[name]=fn;}},screen:{getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}})}},
+  electron:{app:{isPackaged:false},BrowserWindow:FakeWindow,ipcMain:{handle:(name,fn)=>{handlers[name]=fn;}},screen:{getDisplayNearestPoint:()=>({workArea:{x:0,y:0,width:1440,height:900}}),getDisplayMatching:()=>({workArea:{x:0,y:0,width:1440,height:900}})}},
   '@/common/configuration':{__esModule:true,default:{get:key=>values[key],set:(key,value)=>{values[key]=value;popup.syncIncrementalMode(!!value);return true;}}},
   '@/common/translate/translators':{getTranslator:id=>({translate:text=>new Promise((resolve,reject)=>requests.push({id,text,resolve,reject})), ...(id === 'provider-model' ? {translateStream: (text, from, to, progress, signal) => new Promise((resolve,reject)=>requests.push({id,text,resolve,reject,progress,signal}))} : {})}),getEnabledWithCustomIds:()=>['mock', ...values.customTranslators],hasTranslator:id=>['mock', ...values.customTranslators].includes(id)},
   '@/common/translate/translator-name-resolver':{TranslatorNameResolver:{getDisplayName:id=>id,isCustomTranslator:id=>values.customTranslators.includes(id)}},
   '@/common/translate/helper':{autoReSegment:value=>({resultString:value}),normalizeAppend:text=>text,appendSourceText:load('src/common/translate/helper.ts',{}).appendSourceText},
   './clipboard':{clipboard:{writeText:text=>{copied.push(text);return Promise.resolve();}}},'./selection-utils':utils,
+  './popup-space': {showPopupOnCurrentSpace: win => {win.space=currentSpace;win.showInactive();}, popupIsOnCurrentSpace: win => win.space===currentSpace},
+  './selection-chat': {selectionChatModels: () => values.customTranslators.map(id => ({id, name:id, ai:true})),
+    requestSelectionChat: (engine, source, history, question, progress, signal) => new Promise((resolve, reject) => chatRequests.push({engine, source, history: JSON.parse(JSON.stringify(history)), question, progress, signal, resolve, reject}))},
 });
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 (async()=>{
@@ -36,7 +43,53 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   await wait(150); popup.show('second',{x:500,y:500}); await wait(150);
   requests[1].resolve('second result'); await wait(0); requests[0].resolve('old result'); await wait(0);
   assert.equal(window.state.translation,'second result','Late reply must not replace newest selection');
+  const movedFrom = {...window.bounds};
+  const sender = {sender: window.webContents};
+  await handlers['selection-popup:action']({sender:{}}, 'drag-start', {x:550,y:540});
+  await handlers['selection-popup:action'](sender, 'drag-move', {x:750,y:560});
+  assert.deepEqual(JSON.parse(JSON.stringify(window.bounds)), movedFrom, 'Untrusted renderers cannot begin a move');
+  await handlers['selection-popup:action'](sender, 'drag-start', {x:550,y:540});
+  window.emit('blur'); assert(window.visible, 'Moving a non-activating panel must not dismiss it');
+  await handlers['selection-popup:action'](sender, 'drag-move', {x:750,y:560});
+  assert.equal(window.bounds.x, movedFrom.x + 200); assert.equal(window.bounds.y, movedFrom.y + 20);
+  assert.equal(window.bounds.width, movedFrom.width);
+  await handlers['selection-popup:action'](sender, 'drag-move', {x:NaN,y:0});
+  assert.equal(window.bounds.x, movedFrom.x + 200, 'Invalid coordinates must be rejected');
+  await handlers['selection-popup:action'](sender, 'drag-move', {x:-1000,y:-1000});
+  assert.equal(window.bounds.x, 0); assert.equal(window.bounds.y, 0, 'Titlebar remains on screen');
+  await handlers['selection-popup:action'](sender, 'drag-end');
+  await handlers['selection-popup:action'](sender, 'drag-move', {x:850,y:740});
+  assert.equal(window.bounds.x, 0, 'Released pointers cannot continue moving');
+  window.setBounds(movedFrom);
+  assert.equal(window.options.resizable, false, 'Transparent panels use explicit resize handles');
+  for (const edge of utils.popupResizeEdges) {
+    const original = {x:200, y:200, width:450, height:360}; window.setBounds(original);
+    await handlers['selection-popup:action']({sender:{}}, 'resize-start', {edge,x:200,y:200});
+    await handlers['selection-popup:action'](sender, 'resize-move', {x:230,y:240});
+    assert.deepEqual(window.bounds, original, 'Reject resize IPC from another window');
+    await handlers['selection-popup:action'](sender, 'resize-start', {edge,x:200,y:200});
+    window.emit('blur'); assert(window.visible, 'Resizing must not dismiss a non-activating panel');
+    await handlers['selection-popup:action'](sender, 'resize-move', {x:230,y:240});
+    assert.equal(window.bounds.width, 450 + (edge.includes('e') ? 30 : edge.includes('w') ? -30 : 0));
+    assert.equal(window.bounds.height, 360 + (edge.includes('s') ? 40 : edge.includes('n') ? -40 : 0));
+    assert.equal(window.bounds.x, 200 + (edge.includes('w') ? 30 : 0));
+    assert.equal(window.bounds.y, 200 + (edge.includes('n') ? 40 : 0));
+    const resized = {...window.bounds};
+    await handlers['selection-popup:action'](sender, 'resize-move', {x:Infinity,y:240});
+    await handlers['selection-popup:action'](sender, 'resize-end');
+    await handlers['selection-popup:action'](sender, 'resize-move', {x:250,y:260});
+    assert.deepEqual({...window.bounds}, resized, 'Invalid and released moves are ignored');
+  }
+  await handlers['selection-popup:action'](sender, 'size-preset', 'medium');
+  assert.equal(window.bounds.width, 600); assert.equal(window.bounds.height, 480); assert.equal(window.state.sizePreset, 'medium');
+  await handlers['selection-popup:action'](sender, 'size-preset', 'large');
+  assert.equal(window.bounds.width, 780); assert.equal(window.bounds.height, 640);
+  await handlers['selection-popup:action'](sender, 'size-preset', '__proto__');
+  assert.equal(window.bounds.width, 780, 'Reject inherited object keys as presets');
+  await handlers['selection-popup:action'](sender, 'size-preset', 'small');
+  window.setBounds(movedFrom);
   handlers['selection-popup:action']({sender:window.webContents},'pin');
+  popup.workspaceChanged(); assert(window.visible, 'Pinned popup survives a Space change');
   popup.pointerDown({x:0,y:0}); assert(window.visible,'Pinned popup survives an outside click');
   handlers['selection-popup:action']({sender:window.webContents},'pin');
   popup.pointerDown({x:0,y:0}); assert(!window.visible);
@@ -53,8 +106,7 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.equal(window.state.view,'button'); assert.equal(window.bounds.width,40); assert.equal(window.focusable,false);
   if(process.platform==='darwin') {
     assert.equal(window.options.type,'panel','Use a non-activating panel to join fullscreen Spaces without hiding the Dock');
-    assert.equal(window.workspaces.visibleOnFullScreen,true);
-    assert.equal(window.workspaces.skipTransformProcessType,true,'Do not transform the app to hide its Dock icon');
+    assert.equal(window.workspaces,undefined,'Never enable all-Spaces visibility');
   }
   window.emit('blur'); assert(window.visible,'An inactive button must survive source app activation changes');
   await handlers['selection-popup:action']({sender:{}},'translate');
@@ -64,8 +116,11 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   assert.equal(window.focusable,true); assert.equal(window.bounds.width,450);
   requests[before].resolve('button translation'); await wait(0);
   handlers['selection-popup:action']({sender:window.webContents},'pin');
-  popup.offer('do not replace pinned result',{x:0,y:0}); await wait(150);
-  assert.equal(requests.length,before+1); assert.equal(window.state.text,'button only');
+  const pinnedButton = window;
+  popup.offer('new button beside pinned result',{x:0,y:0}); window.emit('ready-to-show'); await wait(150);
+  assert.notEqual(window,pinnedButton); assert(pinnedButton.visible);
+  assert.equal(requests.length,before+1); assert.equal(pinnedButton.state.text,'button only');
+  assert.equal(window.state.view,'button'); assert.equal(window.state.text,'new button beside pinned result');
   popup.hide(); popup.offer('dismissed button',{x:600,y:600}); popup.hide();
   await handlers['selection-popup:action']({sender:window.webContents},'translate');
   assert.equal(requests.length,before+1,'A dismissed button cannot translate stale text');
@@ -157,10 +212,135 @@ const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   await handlers['selection-popup:action']({sender: {}}, 'clear-accumulated');
   assert.equal(values.incrementalCopy, true); assert.equal(window.state.accumulatedCount, 1);
   popup.clearAccumulated(); popup.hide(); await wait(120);
+  values.incrementalCopy = false; popup.syncIncrementalMode(false);
+  await finish('Attached context');
+  const translationsBeforeChat = requests.length;
+  await action('pane', 'chat');
+  assert.equal(window.state.pane, 'chat'); assert(!window.state.pinned, 'Opening Chat does not silently pin a snapshot');
+  assert(window.bounds.height >= 500);
+  assert.equal(requests.length, translationsBeforeChat, 'Opening Chat does not send another translation');
+  assert.equal(chatRequests.length, 0, 'Opening Chat never sends the source before a question');
+  await handlers['selection-popup:action']({sender:{}}, 'chat-send', 'unauthorized');
+  assert.equal(chatRequests.length, 0);
+  await action('chat-send', 'Explain this.'); await action('chat-send', 'duplicate while busy');
+  assert.equal(chatRequests.length, 1); assert.equal(chatRequests[0].source, 'Attached context');
+  assert.equal(chatRequests[0].question, 'Explain this.');
+  chatRequests[0].progress('Answer in progress');
+  assert.equal(window.state.chat.messages[1].content, 'Answer in progress');
+  chatRequests[0].resolve('Complete answer'); await wait(0);
+  await action('chat-send', 'What does that mean?');
+  assert.equal(chatRequests[1].history[1].content, 'Complete answer');
+  chatRequests[1].progress('partial');
+  await action('chat-stop'); assert(chatRequests[1].signal.aborted);
+  assert.equal(window.state.chat.messages[3].status, 'stopped');
+  chatRequests[1].progress('stale'); chatRequests[1].resolve('stale'); await wait(0);
+  assert.equal(window.state.chat.messages[3].content, 'partial');
+  await action('chat-retry'); assert.equal(chatRequests[2].question, 'What does that mean?');
+  chatRequests[2].reject(new Error('Controlled chat failure')); await wait(0);
+  assert.equal(window.state.chat.error, 'Controlled chat failure');
+  assert.equal(window.state.chat.messages.length, 4, 'Retry replaces its incomplete turn');
+  await action('chat-retry'); chatRequests[3].resolve('Retried answer'); await wait(0);
+  await action('pane', 'translation'); assert(!window.state.pinned); assert.equal(window.bounds.height, 360);
+  await action('pane', 'chat'); assert.equal(window.state.chat.messages.length, 4, 'Tab switches retain this conversation');
+  await action('chat-clear'); assert.equal(window.state.chat.messages.length, 0);
+  await action('chat-send', 'To cancel'); const chatCancelled = chatRequests.at(-1);
+  popup.show('Different passage', {x:500,y:500}); await wait(150);
+  requests.at(-1).resolve('Different translation'); await wait(0);
+  assert(chatCancelled.signal.aborted); assert.equal(window.state.chat.messages.length, 0);
+  chatCancelled.progress('Wrong passage'); chatCancelled.resolve('Wrong passage'); await wait(0);
+  assert.equal(window.state.chat.messages.length, 0, 'New selections isolate old conversations');
+  await action('pane', 'chat'); await action('chat-send', 'Dismissed');
+  const chatDismissed = chatRequests.at(-1); popup.hide(); assert(chatDismissed.signal.aborted);
+  chatDismissed.resolve('After close'); await wait(0); assert(!window.visible);
+  values.incrementalCopy = true; popup.syncIncrementalMode(true); popup.clearAccumulated();
   popup.show('x'.repeat(20001), {x: 500, y: 500}); window.emit('ready-to-show');
   assert(window.visible, 'Even an oversize first selection must visibly report its error');
   assert.equal(window.state.status, 'error'); assert.equal(window.state.accumulatedCount, 0);
   popup.hide();
+  values.incrementalCopy = false; popup.syncIncrementalMode(false);
+  await finish('Space test');
+  await action('size-preset', 'medium');
+  window.emit('blur'); popup.workspaceChanged();
+  assert(window.visible, 'Blur and Spaces / Mission Control must retain the unpinned result');
+  assert.equal(window.state.text, 'Space test');
+  popup.hide(); await wait(120); assert(window.destroyed);
+  await finish('Reopened');
+  assert.equal(window.bounds.width,600); assert.equal(window.bounds.height,480,'Remember size after closing and renderer recreation');
+  await action('size-preset','small');
+  await action('pane','chat'); await action('size-preset','large');
+  assert.equal(window.bounds.height,740);
+  await action('pane','translation'); assert.equal(window.bounds.height,360,'Keep separate translation and conversation sizes');
+  await action('pane','chat'); assert.equal(window.bounds.height,740);
+  popup.workspaceChanged(); assert(window.visible,'Unpinned Chat retains its conversation on Space changes');
+  popup.hide();
+  values.selectionPopupTrigger='selectionButton';
+  popup.offer('Space button',{x:600,y:600});
+  popup.workspaceChanged(); window.emit('ready-to-show');
+  assert(!window.visible,'Space changes dismiss buttons and prevent pending ready-to-show from reopening them');
+  // Each pinned window owns its text, chat, cancellation and renderer IPC.
+  values.selectionPopupTrigger='selectionDirect'; values.customTranslators=['provider-model'];
+  await finish('Comparison A'); await action('engine','provider-model'); await wait(150);
+  const pendingA = requests.at(-1); pendingA.progress('A partial');
+  await action('pane','chat'); await action('chat-send','Explain A');
+  const pendingChatA = chatRequests.at(-1); pendingChatA.progress('A chat partial');
+  await action('pin'); const a = window;
+  const actionFor = (win,name,value) => handlers['selection-popup:action']({sender:win.webContents},name,value);
+  popup.show('Comparison B',{x:500,y:500}); window.emit('ready-to-show'); await wait(150);
+  const b = window, pendingB = requests.at(-1);
+  assert.notEqual(a,b); assert(a.visible && b.visible);
+  assert(!pendingA.signal.aborted && !pendingChatA.signal.aborted,'New translation leaves pinned streams running');
+  assert.equal(b.state.pinned,false); assert.equal(b.state.chat.messages.length,0);
+  pendingB.progress('B partial'); pendingB.resolve('B result'); pendingA.resolve('A result'); pendingChatA.resolve('A answer'); await wait(0);
+  assert.equal(a.state.text,'Comparison A'); assert.equal(a.state.translation,'A result');
+  assert.equal(a.state.chat.messages[1].content,'A answer');
+  assert.equal(b.state.text,'Comparison B'); assert.equal(b.state.translation,'B result');
+  assert.notDeepEqual(a.bounds,b.bounds,'Comparison windows must not open exactly on top of one another');
+  popup.pointerDown({x:a.bounds.x+30,y:a.bounds.y+30}); assert(b.visible,'Reading one comparison leaves the other open');
+  await actionFor(a,'copy-result'); assert.equal(copied.at(-1),'A result');
+  await actionFor(b,'copy-result'); assert.equal(copied.at(-1),'B result');
+  await actionFor(a,'size-preset','small'); assert.equal(a.bounds.width,450); assert.equal(b.state.translation,'B result');
+  await actionFor(b,'pin'); popup.show('Comparison C',{x:500,y:500}); window.emit('ready-to-show'); await wait(150);
+  const c = window; requests.at(-1).resolve('C result'); await wait(0);
+  assert(a.visible && b.visible && c.visible);
+  await actionFor(b,'close'); assert(!b.visible && a.visible && c.visible,'Close is scoped to its sender');
+  assert.equal(handlers['selection-popup:state']({sender:a.webContents}).text,'Comparison A');
+  assert.equal(handlers['selection-popup:state']({sender:c.webContents}).text,'Comparison C');
+  focusedWindow=a; popup.dismiss(); focusedWindow=undefined;
+  assert(!a.visible && c.visible,'Escape closes the focused comparison only');
+  // A click or a new translation on another Space cannot erase the original.
+  currentSpace=2; popup.workspaceChanged(); popup.pointerDown({x:0,y:0});
+  focusedWindow=c; popup.dismiss(); focusedWindow=undefined;
+  assert(c.visible && c.state.text==='Comparison C');
+  assert(!popup.contains({x:c.bounds.x+30,y:c.bounds.y+30}),'Off-Space bounds must not count as an own-window hit');
+  await finish('Other Space'); const other=window;
+  assert.notEqual(c,other); assert.equal(c.state.text,'Comparison C');
+  await actionFor(other,'pin');
+  currentSpace=1; popup.workspaceChanged();
+  assert(popup.contains({x:c.bounds.x+30,y:c.bounds.y+30}),'Original popup is present on return');
+  await actionFor(c,'pin');
+  // Pin during a running translation; closing that window cancels only its request.
+  popup.show('Stream A',{x:100,y:100}); window.emit('ready-to-show'); await wait(150);
+  const streamWindow=window, stream=requests.at(-1); await actionFor(streamWindow,'pin');
+  popup.show('Stream B',{x:100,y:100}); window.emit('ready-to-show'); await wait(150);
+  const latest=window, latestRequest=requests.at(-1);
+  await actionFor(streamWindow,'close');
+  assert(stream.signal.aborted && !latestRequest.signal.aborted && latest.visible);
+  stream.progress('stale closed output'); stream.resolve('stale closed output');
+  latestRequest.resolve('Latest output'); await wait(0);
+  assert.equal(latest.state.translation,'Latest output');
   popup.stop();
-  console.log('PASS: popup IPC isolation, stale replies, pin/outside close, dismissed requests, translation errors, button gating/focus/resize, pinned button behavior, shortcut-only/direct/disabled modes, AI engine routing, setup IPC, shared incremental source mode, full retranslation, explicit collection, retry/dedup, clear/cancellation, limits and renderer recreation.');
+  // A Space change during renderer startup must not move the pending result.
+  currentSpace=1; popup.show('Slow renderer',{x:500,y:500}); const starting=window;
+  assert.equal(starting.opacity,0,'Do not flash a blank frame while the renderer loads');
+  currentSpace=2; popup.workspaceChanged(); starting.emit('ready-to-show');
+  assert.equal(starting.space,1); assert.equal(starting.opacity,1);
+  assert(starting.visible && starting.state.text==='Slow renderer');
+  currentSpace=1; await wait(150); requests.at(-1).resolve('Ready on the original desktop'); await wait(0);
+  await actionFor(starting,'pin'); values.incrementalCopy=true; popup.syncIncrementalMode(true);
+  await finish('Fresh comparison');
+  assert.equal(window.state.text,'Fresh comparison'); assert.equal(window.state.accumulatedCount,1);
+  assert.equal(starting.state.text,'Slow renderer','New comparison starts its own incremental source');
+  popup.stop();
+  assert(windows.every(win=>win.destroyed),'Shutdown releases every comparison renderer');
+  console.log('PASS: popup IPC isolation, stale replies, pin/outside close, dismissed requests, translation errors, button gating/focus/resize, pinned button behavior, shortcut-only/direct/disabled modes, AI engine routing, setup IPC, shared incremental source mode, full retranslation, explicit collection, retry/dedup, clear/cancellation, limits, renderer recreation, independent pinned streams/chats, per-window close/Escape, Space retention and off-Space input isolation.');
 })().catch(error=>{popup.stop();console.error(error);process.exitCode=1;});

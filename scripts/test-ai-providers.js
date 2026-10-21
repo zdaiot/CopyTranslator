@@ -53,6 +53,11 @@ async function run() {
   assert.equal(calls[0].body.model, 'model-b');
   assert.equal(calls[0].options.headers.Authorization, 'Bearer fake-key');
   assert(calls[0].body.messages[0].content.includes('Simplified Chinese'));
+  manager.updateProvider('test-provider', {config: {chatEnabled:false, chatPrompt:'Explain the attached passage.'}});
+  assert.equal(manager.getConfig('test-provider-model-b').config.chatEnabled, false);
+  assert.equal(manager.getConfig('test-provider-model-b').config.chatPrompt, 'Explain the attached passage.');
+  manager.reload();
+  assert.equal(manager.getConfig('test-provider-model-b').config.chatEnabled, false, 'Conversation preferences persist across reload');
   assert(manager.setEnabledModels('test-provider', ['model-b']));
   assert(!manager.isCustomTranslator('test-provider-model-a'), 'Disabled models must leave the config and instance caches');
   assert.deepEqual(data.customTranslators, ['test-provider-model-b']);

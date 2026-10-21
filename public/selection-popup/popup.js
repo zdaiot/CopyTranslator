@@ -6,6 +6,8 @@ let optionSignature = '';
 let selectedEngine = '';
 let engines = [];
 let selectionId;
+let activePane = 'translation';
+let chatState = {engine: '', engines: [], messages: [], status: 'idle', error: ''};
 const engineButton = byId('engine');
 const engineMenu = byId('engine-menu');
 
@@ -27,10 +29,12 @@ function openEngineMenu(last = false) {
   focusMenuItem(last ? items[items.length - 1] : items.find(item => item.getAttribute('aria-checked') === 'true') || items[0]);
 }
 function updateEngineLabel() {
-  const name = engines.find(engine => engine.id === selectedEngine)?.name || '选择翻译引擎';
+  const chat = activePane === 'chat';
+  const label = chat ? '对话模型' : '翻译引擎';
+  const name = engines.find(engine => engine.id === selectedEngine)?.name || `选择${label}`;
   byId('engine-name').textContent = name;
-  engineButton.title = `切换翻译引擎 · ${name}`;
-  engineButton.setAttribute('aria-label', `翻译引擎：${name}`);
+  engineButton.title = chat ? `对话模型 · ${name}（切换后开始新对话）` : `切换翻译引擎 · ${name}`;
+  engineButton.setAttribute('aria-label', `${label}：${name}`);
   engineMenu.querySelectorAll('[data-engine-id]').forEach(item => {
     item.setAttribute('aria-checked', String(item.dataset.engineId === selectedEngine));
   });
@@ -39,12 +43,12 @@ function renderEngineMenu() {
   // Keep the chooser in the same web contents. A native <select> menu can fail
   // to appear above a non-activating macOS panel in another app's fullscreen Space.
   engineMenu.replaceChildren();
-  [false, true].forEach(ai => {
+  (activePane === 'chat' ? [true] : [false, true]).forEach(ai => {
     const group = document.createElement('div');
     group.setAttribute('role', 'group');
-    group.setAttribute('aria-label', ai ? 'AI 翻译模型' : '翻译引擎');
+    group.setAttribute('aria-label', ai ? 'AI 模型' : '翻译引擎');
     const heading = document.createElement('div'); heading.className = 'menu-heading';
-    heading.textContent = ai ? 'AI 翻译模型' : '翻译引擎'; heading.setAttribute('aria-hidden', 'true');
+    heading.textContent = ai ? (activePane === 'chat' ? '对话模型' : 'AI 翻译模型') : '翻译引擎'; heading.setAttribute('aria-hidden', 'true');
     group.append(heading);
     const choices = engines.filter(engine => !!engine.ai === ai);
     choices.forEach(({id, name}) => {
@@ -64,28 +68,73 @@ function renderEngineMenu() {
   setup.setAttribute('role', 'menuitem'); setup.tabIndex = -1; setup.dataset.action = 'ai-settings';
   setup.textContent = '＋ 配置 AI 翻译商…'; engineMenu.append(setup);
 }
+function updateChatSend() {
+  byId('chat-send').disabled = chatState.status === 'loading' || !chatState.engine || !sourceText || !byId('chat-input').value.trim();
+}
+function renderChat(chat) {
+  const list = byId('chat-messages');
+  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 50;
+  list.replaceChildren();
+  if (!chat.messages.length) {
+    const empty = document.createElement('div'); empty.className = 'chat-empty';
+    empty.textContent = '这段话有哪些难点？可以让 AI 解释、总结或比较。'; list.append(empty);
+  }
+  chat.messages.forEach(message => {
+    const item = document.createElement('div'); item.className = `chat-message ${message.role}`;
+    const label = document.createElement('span'); label.className = 'chat-message-label';
+    label.textContent = message.role === 'user' ? '你' : 'AI';
+    const content = document.createElement('div'); content.textContent = message.content || (message.status === 'loading' ? '正在回答…' : '');
+    item.append(label, content);
+    if (message.status === 'stopped' || message.status === 'error') {
+      const status = document.createElement('div'); status.className = 'chat-message-status'; status.textContent = message.status === 'stopped' ? '已停止' : '回答未完成'; item.append(status);
+    }
+    list.append(item);
+  });
+  if (atBottom) list.scrollTop = list.scrollHeight;
+  byId('chat-unavailable').hidden = !!chat.engines.length;
+  byId('chat-input').disabled = !chat.engine || !sourceText;
+  byId('chat-stop').hidden = chat.status !== 'loading';
+  byId('chat-error').textContent = chat.error;
+  byId('chat-error').hidden = !chat.error;
+  const last = chat.messages[chat.messages.length - 1];
+  byId('chat-retry').hidden = chat.status === 'loading' || !last || last.role !== 'assistant' || last.status === 'done';
+  byId('chat-clear').disabled = !chat.messages.length;
+  updateChatSend();
+}
 function render(state) {
   if (!state) return;
   const button = state.view === "button";
   byId("selection-button").hidden = !button;
   document.querySelector(".popup").hidden = button;
-  if (selectionId !== state.selectionId) { closeEngineMenu(); selectionId = state.selectionId; }
+  if (selectionId !== state.selectionId) { closeEngineMenu(); selectionId = state.selectionId; byId('chat-input').value = ''; }
   if (button) { closeEngineMenu(); return; }
   if (sourceText !== state.text) closeEngineMenu();
-  engines = state.engines;
-  const signature = JSON.stringify(state.engines);
+  const previousPane = activePane;
+  activePane = state.pane || 'translation';
+  chatState = state.chat || {engine: '', engines: [], messages: [], status: 'idle', error: ''};
+  if (activePane !== previousPane) closeEngineMenu();
+  engines = activePane === 'chat' ? chatState.engines : state.engines;
+  const signature = activePane + JSON.stringify(engines);
   if (signature !== optionSignature) {
     const wasOpen = !engineMenu.hidden;
     renderEngineMenu();
     optionSignature = signature;
-    selectedEngine = state.engine;
+    selectedEngine = activePane === 'chat' ? chatState.engine : state.engine;
     updateEngineLabel();
     if (wasOpen) openEngineMenu();
   }
-  selectedEngine = state.engine;
+  selectedEngine = activePane === 'chat' ? chatState.engine : state.engine;
   updateEngineLabel();
   if (sourceText !== state.text) { byId('source').classList.remove('expanded'); byId('expand').textContent = '展开原文'; }
   sourceText = state.text;
+  const chatting = activePane === 'chat';
+  document.querySelector('.popup').classList.toggle('chat-mode', chatting);
+  byId('translation-panel').hidden = chatting;
+  byId('chat-panel').hidden = !chatting;
+  byId('source-label').textContent = chatting ? '已附上原文' : '原文';
+  document.querySelectorAll('[data-pane]').forEach(tab => { tab.setAttribute('aria-selected', String(tab.dataset.pane === activePane)); tab.tabIndex = tab.dataset.pane === activePane ? 0 : -1; });
+  if (chatting) renderChat(chatState);
+  if (chatting && previousPane !== activePane && chatState.engine) byId('chat-input').focus({preventScroll: true});
   byId('source').textContent = state.text || (state.status === 'idle' ? '已清空，请继续选中文字。' : '');
   byId('copy-source').disabled = !state.text;
   byId('incremental').setAttribute('aria-pressed', String(!!state.incremental));
@@ -102,8 +151,10 @@ function render(state) {
   byId('retry').hidden = state.status !== 'error';
   byId('copy-result').disabled = !state.translation;
   byId('pin').setAttribute('aria-pressed', String(state.pinned));
-  byId('pin').title = state.pinned ? '取消固定' : '固定浮窗';
-  byId('hint').textContent = state.pinned ? '已固定 · Esc 关闭' : '点击外部关闭 · Esc';
+  byId('pin').title = state.pinned ? '取消固定：下次翻译可更新此窗口' : '保留当前内容，下次翻译新开窗口，方便对比';
+  byId('pin').setAttribute('aria-label', state.pinned ? '取消固定浮窗' : '固定浮窗');
+  byId('hint').textContent = state.pinned ? '已固定 · 下次翻译新开窗口' : '留在当前桌面 · 点击外部关闭 · Esc';
+  document.querySelectorAll('[data-size]').forEach(button => button.setAttribute('aria-pressed', String(button.dataset.size === state.sizePreset)));
   byId('direction').textContent = state.from && state.to ? `${names[state.from] || state.from} → ${names[state.to] || state.to}` : '译文';
   document.querySelector('.result-card').setAttribute('aria-busy', String(state.status === 'loading'));
   requestAnimationFrame(() => { byId('expand').hidden = !byId('source').classList.contains('expanded') && byId('source').scrollHeight <= byId('source').clientHeight + 2; });
@@ -130,7 +181,7 @@ engineMenu.addEventListener('click', event => {
   if (id === selectedEngine) return;
   selectedEngine = id;
   updateEngineLabel();
-  api.action('engine', id);
+  api.action(activePane === 'chat' ? 'chat-engine' : 'engine', id);
 });
 engineMenu.addEventListener('keydown', event => {
   const items = menuItems();
@@ -152,7 +203,70 @@ document.addEventListener('focus', event => {
   if (!engineMenu.contains(event.target) && !engineButton.contains(event.target)) closeEngineMenu();
 }, true);
 byId('pin').addEventListener('click', () => api.action('pin'));
+document.querySelectorAll('[data-size]').forEach(button => button.addEventListener('click', () => api.action('size-preset', button.dataset.size)));
 byId('expand').addEventListener('click', () => { const expanded = byId('source').classList.toggle('expanded'); byId('expand').textContent = expanded ? '收起原文' : '展开原文'; });
+document.querySelectorAll('[data-pane]').forEach(tab => {
+  tab.addEventListener('click', () => api.action('pane', tab.dataset.pane));
+  tab.addEventListener('keydown', event => {
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+      event.preventDefault(); const next = activePane === 'chat' ? 'translation' : 'chat';
+      document.querySelector(`[data-pane="${next}"]`).focus(); api.action('pane', next);
+    }
+  });
+});
+const chatInput = byId('chat-input');
+let composing = false;
+chatInput.addEventListener('compositionstart', () => { composing = true; });
+chatInput.addEventListener('compositionend', () => { composing = false; });
+chatInput.addEventListener('input', updateChatSend);
+function sendQuestion() {
+  if (composing || byId('chat-send').disabled) return;
+  const question = chatInput.value.trim();
+  if (!question || question.length > 4000) return;
+  api.action('chat-send', question);
+  chatInput.value = ''; updateChatSend();
+}
+byId('chat-form').addEventListener('submit', event => { event.preventDefault(); sendQuestion(); });
+chatInput.addEventListener('keydown', event => {
+  if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && !composing && event.keyCode !== 229) { event.preventDefault(); sendQuestion(); }
+});
+// Explicit pointer capture works for the macOS panel as well as Windows.
+// Coordinates are screen-space DIP; only this popup can request its own movement.
+function bindWindowGesture(handle, action, edge) {
+  let pointer, frame, pendingPoint;
+  function flush() {
+    if (frame !== undefined) cancelAnimationFrame(frame);
+    frame = undefined;
+    if (pendingPoint) { api.action(`${action}-move`, pendingPoint); pendingPoint = undefined; }
+  }
+  handle.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    event.preventDefault(); closeEngineMenu();
+    pointer = event.pointerId;
+    handle.setPointerCapture(pointer);
+    handle.classList.add('dragging');
+    api.action(`${action}-start`, {x: event.screenX, y: event.screenY, ...(edge ? {edge} : {})});
+  });
+  // Listen on the document as well as capturing the pointer: non-activating
+  // panels can deliver a drag to a neighbouring element before capture settles.
+  document.addEventListener('pointermove', event => {
+    if (event.pointerId !== pointer) return;
+    if (event.buttons === 0) { end(event); return; }
+    pendingPoint = {x: event.screenX, y: event.screenY};
+    if (frame === undefined) frame = requestAnimationFrame(flush);
+  }, true);
+  function end(event) {
+    if (event.pointerId !== pointer) return;
+    flush(); api.action(`${action}-end`);
+    pointer = undefined; handle.classList.remove('dragging');
+    if (handle.hasPointerCapture(event.pointerId)) handle.releasePointerCapture(event.pointerId);
+  }
+  document.addEventListener('pointerup', end, true);
+  document.addEventListener('pointercancel', end, true);
+  handle.addEventListener('lostpointercapture', end);
+}
+bindWindowGesture(byId('drag-handle'), 'drag');
+document.querySelectorAll('[data-resize]').forEach(handle => bindWindowGesture(handle, 'resize', handle.dataset.resize));
 document.addEventListener('keydown', event => { if (event.key === 'Escape') { closeEngineMenu(); api.action('close'); } });
 api.subscribe(render);
 api.state().then(render);

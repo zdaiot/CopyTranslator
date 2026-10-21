@@ -148,6 +148,10 @@ async function run() {
   ctx.editProvider(ctx.providers[1]);
   const defaults = chatMocks['./chat-settings'].DEFAULT_TRANSLATION_PROMPT;
   assert.equal(ctx.providerForm.config.prompt, defaults, 'An existing empty prompt opens with the actual default template');
+  assert.equal(ctx.providerForm.config.chatEnabled, true, 'Existing AI models support conversation by default');
+  assert.equal(ctx.providerForm.config.chatPrompt, chatMocks['./chat-settings'].DEFAULT_CONTEXT_CHAT_PROMPT);
+  ctx.providerForm.config.chatEnabled = false;
+  ctx.providerForm.config.chatPrompt = 'My separate conversation prompt';
   ctx.providerForm.config.prompt = 'Translate {text} to {to} with care';
   ctx.providerForm.config.reasoningProtocol = 'deepseek';
   ctx.providerForm.config.reasoningEffort = 'none';
@@ -163,6 +167,8 @@ async function run() {
   ctx.editProvider(ctx.providers[1]);
   assert.equal(ctx.providerForm.config.prompt, 'Translate {text} to {to} with care', 'Custom prompts survive save and reopen');
   assert.equal(ctx.providerForm.config.reasoningEffort, 'none', 'Reasoning preferences persist');
+  assert.equal(ctx.providerForm.config.chatEnabled, false);
+  assert.equal(ctx.providerForm.config.chatPrompt, 'My separate conversation prompt', 'Chat preferences survive save and reopen without replacing the translation prompt');
   ctx.draftTestResult = 'stale test'; ctx.restoreDefaultPrompt();
   assert.equal(ctx.providerForm.config.prompt, defaults);
   assert.equal(ctx.draftTestResult, '', 'Restoring the default invalidates the old connection test');

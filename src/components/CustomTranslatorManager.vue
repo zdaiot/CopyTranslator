@@ -237,6 +237,13 @@
               @change="draftModelsChanged"
             ></v-combobox>
             <p v-if="draftModelNotice" class="caption mt-1" role="status">{{ draftModelNotice }}</p>
+            <v-switch
+              :input-value="providerForm.config.chatEnabled !== false"
+              @change="$set(providerForm.config, 'chatEnabled', $event)"
+              :label="isChinese ? '选中文字对话' : 'Chat about selected text'"
+              :hint="isChinese ? '该供应商的已启用模型可在划词浮窗中回答问题、连续追问；每次请求附上原文及当前对话。' : 'Use enabled models in the selection popup to ask questions and follow up. Requests include the passage and current conversation.'"
+              persistent-hint dense class="mb-4"
+            ></v-switch>
             <v-alert v-if="draftModelError" type="warning" dense text class="mt-2" role="alert">{{ draftModelError }}</v-alert>
             <v-select v-if="providerForm.enabledModels.length > 1" :value="draftTestModelId" :items="providerForm.enabledModels"
               :label="isChinese ? '用于测试的模型' : 'Model to test'" outlined dense hide-details class="mt-3"
@@ -261,7 +268,7 @@
                   <v-switch
                     :input-value="providerForm.config.stream !== false"
                     @change="setDraftStream"
-                    :label="isChinese ? '流式显示译文' : 'Stream translations'"
+                    :label="isChinese ? '流式显示译文与回答' : 'Stream translations and answers'"
                     :hint="isChinese ? '收到译文即显示；服务明确拒绝流式时自动改用普通返回。测试连接可验证实际返回方式。' : 'Show text as it arrives. Explicit stream rejection falls back to a complete response. Test the actual response mode below.'"
                     persistent-hint dense
                   ></v-switch>
@@ -322,6 +329,17 @@
                   ></v-textarea>
                   <v-btn small text color="primary" @click="restoreDefaultPrompt">
                     {{ isChinese ? '恢复默认提示词' : 'Restore default prompt' }}
+                  </v-btn>
+                  <v-textarea
+                    v-if="providerForm.config.chatEnabled !== false"
+                    v-model="providerForm.config.chatPrompt"
+                    :label="isChinese ? '对话提示词' : 'Conversation prompt'"
+                    :placeholder="defaultChatPrompt"
+                    :hint="isChinese ? '独立于翻译提示词。原文自动附在消息中，无需填写占位符；留空使用默认提示词。' : 'Separate from translation. The passage is attached automatically; no placeholders are needed. Empty uses the default prompt.'"
+                    persistent-hint rows="5" outlined dense class="mt-4"
+                  ></v-textarea>
+                  <v-btn v-if="providerForm.config.chatEnabled !== false" small text color="primary" @click="providerForm.config.chatPrompt = defaultChatPrompt">
+                    {{ isChinese ? '恢复默认对话提示词' : 'Restore conversation prompt' }}
                   </v-btn>
                 </v-expansion-panel-content>
               </v-expansion-panel>
@@ -417,7 +435,7 @@ import { Component, Vue } from "vue-property-decorator";
 import { clipboard, ipcRenderer } from "electron";
 import { customTranslatorManager } from "@/common/translate/custom-translators";
 import { normalizeProviderConnection, normalizeModelIds } from "@/common/translate/provider-config";
-import { DEFAULT_TRANSLATION_PROMPT, effectivePrompt, reasoningProtocol, reasoningChoices } from "@/common/translate/chat-settings";
+import { DEFAULT_TRANSLATION_PROMPT, DEFAULT_CONTEXT_CHAT_PROMPT, effectivePrompt, reasoningProtocol, reasoningChoices } from "@/common/translate/chat-settings";
 import { ProviderConfig } from "@/common/translate/types";
 import { providerTemplates, getProviderTemplate } from "@/common/translate/provider-templates";
 import eventBus from "@/common/event-bus";
@@ -431,6 +449,7 @@ interface ProviderWithUI extends ProviderConfig {
 @Component
 export default class CustomTranslatorManagerView extends Vue {
   readonly defaultPrompt = DEFAULT_TRANSLATION_PROMPT;
+  readonly defaultChatPrompt = DEFAULT_CONTEXT_CHAT_PROMPT;
   providers: ProviderWithUI[] = [];
   expandedProviders: number[] = [];
   showAddProviderDialog = false;
@@ -476,6 +495,8 @@ export default class CustomTranslatorManagerView extends Vue {
       maxTokens: 4000,
       prompt: DEFAULT_TRANSLATION_PROMPT,
       stream: true,
+      chatEnabled: true,
+      chatPrompt: DEFAULT_CONTEXT_CHAT_PROMPT,
       reasoningProtocol: "auto",
       reasoningEffort: "default",
     },
@@ -757,7 +778,7 @@ export default class CustomTranslatorManagerView extends Vue {
     this.editingProvider = provider;
     // Load only persisted fields, without the list panel's temporary UI state.
     this.providerForm = JSON.parse(JSON.stringify(customTranslatorManager.getProvider(provider.id) || provider));
-    this.providerForm.config = { temperature: 0.3, maxTokens: 4000, stream: true, reasoningProtocol: "auto", reasoningEffort: "default", ...this.providerForm.config, prompt: effectivePrompt(this.providerForm.config?.prompt) };
+    this.providerForm.config = { temperature: 0.3, maxTokens: 4000, stream: true, chatEnabled: true, chatPrompt: DEFAULT_CONTEXT_CHAT_PROMPT, reasoningProtocol: "auto", reasoningEffort: "default", ...this.providerForm.config, prompt: effectivePrompt(this.providerForm.config?.prompt) };
     this.draftModels = normalizeModelIds([...(this.providerForm.availableModels || []), ...this.providerForm.enabledModels]);
     this.selectedTemplate = "";
     this.showAddProviderDialog = true;
@@ -786,6 +807,8 @@ export default class CustomTranslatorManagerView extends Vue {
         maxTokens: 4000,
         prompt: DEFAULT_TRANSLATION_PROMPT,
         stream: true,
+        chatEnabled: true,
+        chatPrompt: DEFAULT_CONTEXT_CHAT_PROMPT,
         reasoningProtocol: "auto",
         reasoningEffort: "default",
       };
@@ -844,6 +867,8 @@ export default class CustomTranslatorManagerView extends Vue {
         maxTokens: 4000,
         prompt: DEFAULT_TRANSLATION_PROMPT,
         stream: true,
+        chatEnabled: true,
+        chatPrompt: DEFAULT_CONTEXT_CHAT_PROMPT,
         reasoningProtocol: "auto",
         reasoningEffort: "default",
       },
