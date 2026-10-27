@@ -92,7 +92,9 @@ Windows 使用 `uiohook-napi` 监听选词手势；按需启动的 Windows Power
 
 不能保证“任意软件”都允许获取选中文字：图片内的文字、受保护内容、部分 PDF 或画布仍需使用原有截图/OCR 功能。此功能不会自动对整屏做 OCR。Linux 保留 X11 选区读取，需要 `xprop`；本次未验证 Linux，Wayland 的全局读取限制仍然存在。
 
-## 百度翻译与 Dock
+## 百度翻译与应用图标
+
+“设置 → 开关 → 基础 → 显示菜单栏/托盘图标”可即时显示或隐藏 macOS 顶部菜单栏图标（Windows / Linux 为托盘图标），重启后保留选择。它与“隐藏任务栏”独立，不影响 Dock、划词翻译或快捷键。隐藏后可从 Dock、Finder 的应用程序或浮窗的“打开主窗口”回到设置并恢复图标；再次启动应用也会显示已有主窗口。
 
 旧 v11 发布包包含百度兼容接口，而本仓库原有 `@opentranslate/baidu` 依赖仅走需要密钥的官方 API。空配置因此报认证失败。本次新增百度兼容适配器：用户自己的 APP ID 和密钥优先；两项留空时使用构建提供的兼容配置。认证、额度、网络和空结果错误会给出明确提示。
 
@@ -125,6 +127,7 @@ npm run test:ai
 node scripts/test-native-mac.js
 node scripts/test-native-mac.js build/native/arm64/selection-helper --fallback
 node scripts/smoke-mac.js
+node scripts/smoke-mac.js --tray  # 菜单栏图标开关、配置保存与隐藏后的主窗口恢复
 node scripts/smoke-mac.js --native-input  # 可选：移动系统鼠标验证八方向缩放
 node scripts/smoke-mac.js --global  # 在受控测试应用中验证拖选到浮窗的完整流程
 ```
@@ -169,3 +172,7 @@ AI 供应商配置改进（2026-10-12）：修复 Mac 原生编辑菜单中的�
 相关实现依据：[Electron 面板默认强制加入所有 Space](https://github.com/electron/electron/blob/v44.7.0/shell/browser/ui/cocoa/electron_ns_panel.mm)、[AppKit managed 窗口行为](https://developer.apple.com/documentation/appkit/nswindow/collectionbehavior-swift.struct/managed)、[系统输入目标进程字段](https://developer.apple.com/documentation/coregraphics/cgeventfield/eventtargetunixprocessid)。
 
 本轮最终安装版已替换 `/Applications/copytranslator.app`；旧版备份在 `~/Library/Application Support/CopyTranslator Backups/20261021-145721-popup-space-comparison/`。安装文件与构建文件逐项校验一致，完整签名与 DMG SHA-256 验证通过。用户重新允许辅助功能后，重启安装版并在主界面确认“权限已就绪”。
+
+菜单栏图标开关（2026-10-27）：新增持久化的“显示菜单栏/托盘图标”，旧配置默认显示。关闭时销毁原生图标，开启时重新创建；重复同步不会叠加点击回调。再次启动应用会显示已隐藏的主窗口。TypeScript、ARM64 构建与签名检查通过；`smoke-mac.js --tray` 在临时配置中验证启动隐藏、设置页反复开关、落盘保存及两种激活事件恢复主窗口。完整浮窗冒烟在当前桌面发生变化后未完成，本轮不计为通过。安装版已实际关闭图标并重启确认保留；用户刷新辅助功能授权后，再次重启安装版，已在主界面确认“权限已就绪”，菜单栏图标仍保持隐藏。
+
+百度首次使用复查（2026-10-27）：使用当前安装包与独立临时配置，未指定翻译引擎或填写百度 APP ID / 密钥，由应用补齐首次使用默认值；关闭剪贴板监听及全局取词以隔离个人内容。运行时默认引擎与实际引擎均为百度，构建内兼容配置存在。真实接口验证英译中、中译英及自动识别均返回有效译文，主窗口完整翻译流程也通过（“The sun rises in the east.” → “太阳从东方升起。”）。百度路由、空配置合并、个人密钥优先级及错误处理测试通过，无需修改默认引擎。此结果针对当前带兼容配置的安装包；其他机器仅拉取源码构建时，仍需按上文提供构建配置或个人密钥。

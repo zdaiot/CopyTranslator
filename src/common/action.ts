@@ -424,6 +424,7 @@ class ActionManager {
     this.append(switchAction("autoHide"));
     this.append(switchAction("autoShow"));
     this.append(switchAction("skipTaskbar"));
+    this.append(switchAction("showTrayIcon"));
     this.append(switchAction("multiSource"));
 
     this.append(switchAction("openAtLogin", "advance"));
@@ -573,6 +574,7 @@ class ActionManager {
       interfaceFontFamily: { group: "字体", span: 1 },
       hideDirect: { group: "窗口", span: 0.5 },
       skipTaskbar: { group: "窗口", span: 0.5 },
+      showTrayIcon: { group: "窗口", span: 1 },
       stayTop: { group: "窗口", span: 0.5 },
       drawer: { group: "窗口", span: 0.5 },
       autoHide: { group: "窗口", span: 0.5 },

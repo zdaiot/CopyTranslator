@@ -144,6 +144,7 @@ export const structActionTypes: readonly StructActionType[] = flatten([
 //切换值的动作
 export const switchActionTypes = [
   "skipTaskbar",
+  "showTrayIcon",
   "stayTop",
   "listenClipboard",
   "enableOCR",

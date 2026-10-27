@@ -199,6 +199,7 @@ function initConfig(
 
   //外观相关
   config.setRule("skipTaskbar", new TypeRule<boolean>(false));
+  config.setRule("showTrayIcon", new TypeRule<boolean>(true));
   config.setRule("multiSource", new TypeRule<boolean>(false));
   config.setRule("drawer", new TypeRule<boolean>(true));
   config.setRule("localeSetting", new UnionRule<Language>("auto", languages));

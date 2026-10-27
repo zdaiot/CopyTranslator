@@ -10,6 +10,7 @@ const { spawn, spawnSync } = require('child_process');
 const readline = require('readline');
 const globalMode = process.argv.includes('--global');
 const nativeInput = process.argv.includes('--native-input');
+const trayMode = process.argv.includes('--tray');
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function eventually(check, description) {
   for (let i=0;i<60;i++) { if (await check()) return; await wait(50); }
@@ -43,6 +44,25 @@ async function target(port, match) {
   }
   throw new Error('Debugger target did not appear');
 }
+async function verifyTray(main, settings) {
+  const toggleTray = () => settings.evaluate('Array.from(document.querySelectorAll(".action-row")).find(row => row.querySelector(".action-label")?.textContent === "显示菜单栏/托盘图标").querySelector("input").click()');
+  await toggleTray();
+  await eventually(async()=>await main.evaluate('!!global.controller.menu.tray && !global.controller.menu.tray.isDestroyed()'),'Settings restore a live native tray icon');
+  await main.evaluate('global.previousTray = global.controller.menu.tray; global.controller.menu.init(); global.controller.menu.refreshTray()');
+  assert.equal(await main.evaluate('global.controller.menu.tray === global.previousTray && global.previousTray.listenerCount("click") === 1 && global.previousTray.listenerCount("right-click") === 1'),true,'Refreshing the icon never duplicates it or its handlers');
+  await toggleTray();
+  await eventually(async()=>await main.evaluate('global.previousTray.isDestroyed() && global.controller.menu.tray === undefined'),'Settings remove the native tray icon immediately');
+  await toggleTray();
+  await eventually(async()=>await main.evaluate('!!global.controller.menu.tray && global.controller.menu.tray !== global.previousTray && !global.controller.menu.tray.isDestroyed()'),'A hidden tray can be recreated');
+  await toggleTray();
+  await eventually(async()=>await main.evaluate('global.controller.get("showTrayIcon") === false && global.controller.menu.tray === undefined'),'Tray preference stays off');
+  await main.evaluate('global.controller.config.save()');
+  assert.equal(JSON.parse(fs.readFileSync(path.join(profile,'copytranslator.json'),'utf8')).showTrayIcon,false,'Hidden tray preference persists to disk');
+  await main.evaluate('global.controller.win.mainWindow.hide(); global.testElectron.app.emit("activate")');
+  assert.equal(await main.evaluate('global.controller.win.mainWindow.isVisible()'),true,'App activation restores the hidden main window without a tray');
+  await main.evaluate('global.controller.win.mainWindow.hide(); global.testElectron.app.emit("second-instance")');
+  assert.equal(await main.evaluate('global.controller.win.mainWindow.isVisible()'),true,'A second launch restores the hidden main window without a tray');
+}
 (async()=>{
   server=http.createServer(async(req,res)=>{
     let body='';for await(const chunk of req)body+=chunk;
@@ -56,7 +76,7 @@ async function target(port, match) {
     version:'v12.1.0 知微',listenClipboard:false,enableOCR:false,dragCopy:false,selectionPopup:!globalMode,autoCheckUpdate:false,isNewUser:false,stayTop:false,autoCopy:false,autoPaste:false,openAtLogin:false,localeSetting:'zh-CN',
     translatorType:'smoke-test',sourceLanguage:'en',targetLanguage:'zh-CN',smartTranslate:false,
     translatorProviders:[{id:'smoke',name:'本地测试',providerType:'custom',apiBase:`http://127.0.0.1:${server.address().port}/v1`,apiKey:'test-only',enabledModels:['test'],enabled:true}],
-    'translator-enabled':['smoke-test'],autoShow:false
+    'translator-enabled':['smoke-test'],autoShow:false,showTrayIcon:false
   }));
   const port=await freePort(), mainPort=await freePort();
   const binary=path.resolve(process.argv.slice(2).find(arg=>!arg.startsWith('--'))||'dist_electron/mac-arm64/copytranslator.app/Contents/MacOS/copytranslator');
@@ -68,6 +88,7 @@ async function target(port, match) {
   assert((await page.evaluate('document.querySelectorAll("button").length'))>5,'Main UI renders');
   assert.equal(await main.evaluate('process.arch'),'arm64');
   assert.equal(await main.evaluate('global.controller.get("translatorType")'),'smoke-test');
+  assert.equal(await main.evaluate('global.controller.menu.tray === undefined'),true,'A saved hidden preference avoids creating a tray icon at startup');
   if (globalMode) {
     const fixture = path.join(output, 'selection-source');
     const compiled = spawnSync('xcrun', ['swiftc', 'tests/native/SelectionSource.swift', '-o', fixture], {stdio:'inherit'});
@@ -93,6 +114,17 @@ async function target(port, match) {
   }
   await main.evaluate('global.testElectron=process.getBuiltinModule("module").createRequire(process.execPath)("electron"); global.controller.win.mainWindow.show()');
   await wait(700);
+  if (trayMode) {
+    await main.evaluate('global.controller.handle("settings", "switches")');
+    const settings=await connect((await target(port,p=>p.url.includes('settings'))).webSocketDebuggerUrl);
+    await eventually(async()=>(await settings.evaluate('document.body.innerText')).includes('显示菜单栏/托盘图标'),'Tray setting is visible');
+    await verifyTray(main, settings);
+    assert.equal(await main.evaluate('global.controller.get("selectionPopup")'),true,'Hiding the tray keeps selection translation enabled');
+    assert.equal(errors.length,0,JSON.stringify(errors));
+    const result={architecture:'arm64',mainUI:true,settings:true,trayHiddenAtStartup:true,trayVisibility:true,trayPreferenceSaved:true,hiddenTrayReopen:true,selectionSettingPreserved:true,errors};
+    fs.writeFileSync(path.join(output,'tray-result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
+    return;
+  }
   const originalTheme = await main.evaluate('global.testElectron.nativeTheme.themeSource');
   const dark = () => page.evaluate('document.querySelector(".v-application").classList.contains("theme--dark")');
   await main.evaluate('global.controller.set("colorMode","auto"); global.testElectron.nativeTheme.themeSource="dark"');
@@ -172,6 +204,7 @@ async function target(port, match) {
   await main.evaluate('global.controller.handle("settings", "switches")');
   const settings=await connect((await target(port,p=>p.url.includes('settings'))).webSocketDebuggerUrl);await wait(600);
   assert((await settings.evaluate('document.body.innerText')).includes('全局划词浮窗'),'Settings expose the new switch');
+  await verifyTray(main, settings);
   // Observe real macOS Space notifications using the shipped helper, with
   // clipboard and selection monitoring left disabled. A temporary test window
   // enters and leaves fullscreen, returning to the original desktop afterwards.
@@ -224,7 +257,7 @@ async function target(port, match) {
   sourceChild.stdin.write('quit\n'); foreignLines.close();
   spaceChild.stdin.end(); spaceLines.close();
   assert.equal(errors.length,0,JSON.stringify(errors));
-  const result={architecture:'arm64',mainUI:true,settings:true,popup:true,liveSystemTheme:true,explicitThemeOverrides:true,eightResizeHandles:nativeInput,sizePresets:true,workspaceRetention:true,nativeSpaceBinding:true,fullscreenResult:true,foreignFullscreenResult:true,desktopRoundTrip:true,independentComparisons:true,nativeSpaceNotifications:true,sandbox:true,ipcIsolation:true,translation:true,staleReply:true,errorState:true,pinAndClose:true,errors};
+  const result={architecture:'arm64',mainUI:true,settings:true,trayVisibility:true,trayPreferenceSaved:true,hiddenTrayReopen:true,popup:true,liveSystemTheme:true,explicitThemeOverrides:true,eightResizeHandles:nativeInput,sizePresets:true,workspaceRetention:true,nativeSpaceBinding:true,fullscreenResult:true,foreignFullscreenResult:true,desktopRoundTrip:true,independentComparisons:true,nativeSpaceNotifications:true,sandbox:true,ipcIsolation:true,translation:true,staleReply:true,errorState:true,pinAndClose:true,errors};
   fs.writeFileSync(path.join(output,'result.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
 })().catch(error=>{console.error(error);process.exitCode=1;}).finally(async()=>{
   sockets.forEach(socket=>socket.close());

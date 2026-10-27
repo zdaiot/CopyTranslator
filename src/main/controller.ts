@@ -302,6 +302,9 @@ class Controller extends MainController {
           } else this.win.mainWindow.setSkipTaskbar(value);
         });
         break;
+      case "showTrayIcon":
+        this.menu.refreshTray();
+        break;
       case "openAtLogin":
         if (!process.env.COPYTRANSLATOR_CONFIG_DIR) app.setLoginItemSettings({ openAtLogin: value });
         break;

@@ -383,5 +383,7 @@
     "selectionButton": "Click selection button (recommended)",
     "selectionDirect": "Translate immediately",
     "selectionShortcut": "Keyboard shortcut only",
-    "selectionTranslate": "Translate current selection"
+    "selectionTranslate": "Translate current selection",
+    "showTrayIcon": "Show Menu Bar / Tray Icon",
+    "<tooltip>showTrayIcon": "Show the macOS menu bar or system tray icon. When hidden, reopen the app to show its main window. Selection translation stays available."
 }

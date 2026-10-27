@@ -38,6 +38,7 @@ export class MenuManager {
   config: ConfigParser;
   act: ActionManager;
   tray: Tray | undefined;
+  private initialized = false;
 
   constructor(controller: CommonController) {
     this.act = controller.action;
@@ -108,12 +109,26 @@ export class MenuManager {
   }
 
   init() {
-    this.tray = this.tray ? this.tray : new Tray(env.trayIconPath);
-    this.tray.setToolTip(constants.appName);
-    this.tray.on("right-click", (event) => {
-      (this.tray as any).popUpContextMenu(this.getMenu("tray"));
+    this.initialized = true;
+    this.refreshTray();
+  }
+
+  refreshTray() {
+    // Configuration is restored before Electron is ready and init() is called.
+    if (!this.initialized) return;
+    if (!this.config.get<boolean>("showTrayIcon")) {
+      if (this.tray && !this.tray.isDestroyed()) this.tray.destroy();
+      this.tray = undefined;
+      return;
+    }
+    if (this.tray && !this.tray.isDestroyed()) return;
+    const tray = new Tray(env.trayIconPath);
+    this.tray = tray;
+    tray.setToolTip(constants.appName);
+    tray.on("right-click", () => {
+      tray.popUpContextMenu(this.getMenu("tray"));
     });
-    this.tray.on("click", (event) => {
+    tray.on("click", () => {
       bus.at("dispatch", "showWindow");
     });
   }
